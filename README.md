@@ -1,5 +1,18 @@
 # Side-Step for ACE-Step 1.5
 
+> [!WARNING]
+> **Deprecated — archival period ends March 1, 2027.** This implementation is
+> preserved for six months as a reference for existing users and for the
+> measured training, conditioning, evaluation, and low-VRAM work it contains.
+> It will receive only critical maintenance during that period and will then
+> be archived as read-only. Development is moving to a clean-slate successor
+> because this repository accumulated overlapping UI stacks, an oversized
+> configuration surface, CUDA-specific assumptions, and experimental features
+> faster than they could be benchmarked and validated. The rewrite will retain
+> proven behavior while prioritizing cross-accelerator support, training speed,
+> low-VRAM operation, a compact namespace, unified schemas, and evidence-backed
+> features.
+
 ```
  ░▒▓███████▓▒░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░░▒▓███████▓▒░▒▓████████▓▒░▒▓████████▓▒░▒▓███████▓▒░ 
 ░▒▓█▓▒░      ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░         ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░
