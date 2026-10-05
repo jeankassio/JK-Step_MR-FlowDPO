@@ -4,6 +4,20 @@
    with live preview of all GUI components.
    ============================================================ */
 
+// Load the same persisted interface language in this standalone window.
+(async () => {
+  if (window.JKLegacyI18n) return;
+  for (const name of ['legacy-i18n-messages.js','legacy-i18n-dynamic.js','legacy-i18n-tutorial.js','legacy-i18n-theme.js','legacy-i18n.js']) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'js/' + name;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('Could not load interface language'));
+      document.head.appendChild(script);
+    });
+  }
+})().catch(error => console.warn('[i18n] Theme editor language unavailable:', error));
+
 const ThemeEditor = (() => {
   "use strict";
 
@@ -210,6 +224,7 @@ const ThemeEditor = (() => {
       for (const t of themes) {
         const opt = document.createElement("option");
         opt.value = t.id;
+        opt.setAttribute("data-no-i18n", "");
         opt.textContent = t.name + (t.source === "user" ? " [user]" : "");
         sel.appendChild(opt);
       }

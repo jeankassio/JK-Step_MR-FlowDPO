@@ -162,6 +162,7 @@ const Theme = (() => {
     for (const t of themes) {
       const opt = document.createElement("option");
       opt.value = t.id;
+        opt.setAttribute("data-no-i18n", "");
       opt.textContent = t.name + (t.source === "user" ? " [user]" : "");
       if (t.id === _currentName) opt.selected = true;
       sel.appendChild(opt);

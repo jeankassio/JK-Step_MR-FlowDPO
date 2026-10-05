@@ -239,13 +239,13 @@ const Dataset = (() => {
             <span class="ap-row-thumb-scanlines"></span>
           </span>
           <span class="dataset-folder-indent" style="margin-left:${Math.max(0, depth) * 12}px;"></span>
-          <span title="${_esc(f.relative_path || f.name)}">${_esc(f.name.length > 44 ? f.name.slice(0, 41) + '...' : f.name)}</span>
+          <span data-no-i18n title="${_esc(f.relative_path || f.name)}">${_esc(f.name.length > 44 ? f.name.slice(0, 41) + '...' : f.name)}</span>
         </td>
         <td>${_fmtDuration(f.duration)}</td>
         <td>${sidecarStatus}</td>
-        <td>${f.genre ? _esc(f.genre) : '<span class="u-text-muted">--</span>'}</td>
-        <td>${f.tags ? _esc(f.tags) : '<span class="u-text-muted">--</span>'}</td>
-        <td>${f.trigger ? _esc(f.trigger) : '<span class="u-text-muted">--</span>'}</td>
+        <td data-no-i18n>${f.genre ? _esc(f.genre) : '<span class="u-text-muted">--</span>'}</td>
+        <td data-no-i18n>${f.tags ? _esc(f.tags) : '<span class="u-text-muted">--</span>'}</td>
+        <td data-no-i18n>${f.trigger ? _esc(f.trigger) : '<span class="u-text-muted">--</span>'}</td>
         <td><button class="btn btn--sm sidecar-edit-btn" data-idx="${idx}">${editLabel}</button></td>
       `;
       // Store cover URL for lazy loading (don't fetch until row is visible)
@@ -291,13 +291,13 @@ const Dataset = (() => {
         tr.innerHTML = `
           <td>
             <span class="dataset-folder-indent" style="margin-left:${depth * 12}px;"></span>
-            <button class="dataset-folder-toggle ${_expandedFolders.has(folderPath) ? 'open' : ''}" data-action="toggle-folder" data-folder="${_esc(folderPath)}" ${hasChildren ? '' : 'disabled'}>${_esc(folder.name || folderPath)}</button>
+            <button data-no-i18n class="dataset-folder-toggle ${_expandedFolders.has(folderPath) ? 'open' : ''}" data-action="toggle-folder" data-folder="${_esc(folderPath)}" ${hasChildren ? '' : 'disabled'}>${_esc(folder.name || folderPath)}</button>
           </td>
           <td>${_fmtTotalDuration(duration)}</td>
           <td><span class="u-text-muted">${sidecars}/${count} sidecars</span></td>
           <td><span class="u-text-muted">--</span></td>
           <td><span class="u-text-muted">--</span></td>
-          <td>${folder.common_trigger ? `<span class="u-text-secondary">${_esc(folder.common_trigger)}</span>` : '<span class="u-text-muted">--</span>'}</td>
+          <td data-no-i18n>${folder.common_trigger ? `<span class="u-text-secondary">${_esc(folder.common_trigger)}</span>` : '<span class="u-text-muted">--</span>'}</td>
           <td><button class="btn btn--sm" data-action="preprocess-folder" data-folder="${_esc(folderPath)}">Preprocess</button></td>
         `;
         tbody.appendChild(tr);

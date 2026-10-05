@@ -49,6 +49,7 @@ _model: Any = None
 _processor: Any = None
 _loaded_tier: Optional[str] = None
 _loaded_cpu_offload: Optional[bool] = None
+_loaded_override: Any = None
 
 
 class LocalCaptionOOMError(RuntimeError):
@@ -213,8 +214,10 @@ def _build_conversation(
     artist: str,
     lyrics_excerpt: str,
     audio_source: Optional[Path],
+    *, prompt_instructions: Optional[str] = None,
+    system_prompt: Optional[str] = None, full_audio: bool = False,
 ) -> list[dict[str, Any]]:
-    user_prompt = build_user_prompt(
+    user_prompt = prompt_instructions if prompt_instructions is not None else build_user_prompt(
         title,
         artist,
         lyrics_excerpt,
@@ -222,7 +225,7 @@ def _build_conversation(
     )
     user_content: list[dict[str, str]] = []
     if audio_source and audio_source.is_file():
-        audio_start, audio_end = _audio_window(audio_source)
+        audio_start, audio_end = (0.0, None) if full_audio else _audio_window(audio_source)
         audio_payload: dict[str, Any] = {"type": "audio", "audio": str(audio_source)}
         if audio_start is not None:
             audio_payload["audio_start"] = audio_start
@@ -233,7 +236,7 @@ def _build_conversation(
     return [
         {
             "role": "system",
-            "content": [{"type": "text", "text": get_system_prompt("local") or ""}],
+            "content": [{"type": "text", "text": system_prompt if system_prompt is not None else get_system_prompt("local") or ""}],
         },
         {
             "role": "user",
@@ -262,7 +265,8 @@ def _resolve_model_path() -> str:
     """
     project_root = Path(__file__).resolve().parent.parent.parent
     local_dir = project_root / "checkpoints" / "Qwen2.5-Omni-7B"
-    if local_dir.is_dir() and any(local_dir.iterdir()):
+    from jk_step.models import hf_weights_ready
+    if local_dir.is_dir() and hf_weights_ready(local_dir) and (local_dir / "tokenizer_config.json").is_file():
         logger.info("Using local model weights: %s", local_dir)
         return str(local_dir)
     return MODEL_ID
@@ -318,16 +322,19 @@ def _pick_attention_backend() -> Optional[str]:
     return "flash_attention_2" if major >= 8 else None
 
 
-def _load_model(tier: str, *, allow_cpu_offload: bool = False) -> None:
+def _load_model(tier: str, *, allow_cpu_offload: bool = False, model_id: Optional[str] = None,
+                device: Optional[str] = None, allow_download: bool = True,
+                revision: Optional[str] = None, text_only: bool = False) -> None:
     """Load model + processor into module-level cache.
 
     Args:
         tier: ``"8-10gb"`` for 4-bit NF4 or ``"16gb"`` for native bf16/fp16.
         allow_cpu_offload: Whether Accelerate CPU offload may be used when needed.
     """
-    global _model, _processor, _loaded_tier, _loaded_cpu_offload  # noqa: PLW0603
+    global _model, _processor, _loaded_tier, _loaded_cpu_offload, _loaded_override
+    override = (model_id, device, allow_download, revision, text_only)
 
-    if _model is not None and _loaded_tier == tier and _loaded_cpu_offload == allow_cpu_offload:
+    if _model is not None and _loaded_tier == tier and _loaded_cpu_offload == allow_cpu_offload and _loaded_override == override:
         return  # already loaded at the right tier
 
     # Unload first if switching tiers
@@ -340,9 +347,14 @@ def _load_model(tier: str, *, allow_cpu_offload: bool = False) -> None:
         Qwen2_5OmniProcessor,
     )
 
-    model_path = _resolve_model_path()
-    compute_dtype = _pick_dtype()
-    attention_backend = _pick_attention_backend()
+    model_path = model_id or _resolve_model_path()
+    if device and device.startswith("cuda"):
+        with torch.cuda.device(device):
+            compute_dtype = _pick_dtype()
+            attention_backend = _pick_attention_backend()
+    else:
+        compute_dtype = torch.float32 if device == "cpu" else _pick_dtype()
+        attention_backend = None if device == "cpu" else _pick_attention_backend()
     load_started = time.perf_counter()
     logger.info(
         "Loading Qwen2.5-Omni-7B (tier=%s, dtype=%s, attn=%s, cpu_offload=%s) from %s …",
@@ -352,11 +364,20 @@ def _load_model(tier: str, *, allow_cpu_offload: bool = False) -> None:
     load_kwargs: dict[str, Any] = {
         "trust_remote_code": True,
         "low_cpu_mem_usage": True,
+        "local_files_only": not allow_download,
     }
     if attention_backend:
         load_kwargs["attn_implementation"] = attention_backend
+    if revision is not None:
+        load_kwargs["revision"] = revision
+    if text_only:
+        # Transformers 4.57 Qwen2_5OmniConfig controls construction of talker
+        # and token2wav. Do not allocate speech-output weights for captioning.
+        load_kwargs["enable_audio_output"] = False
 
-    if torch.cuda.is_available():
+    if device is not None:
+        load_kwargs["device_map"] = {"": device}
+    elif torch.cuda.is_available():
         load_kwargs["device_map"] = "auto" if allow_cpu_offload else {"": "cuda:0"}
     elif hasattr(torch, 'mps') and torch.mps.is_available():
         load_kwargs["device_map"] = "mps"
@@ -382,10 +403,12 @@ def _load_model(tier: str, *, allow_cpu_offload: bool = False) -> None:
         )
         _model.disable_talker()
         _processor = Qwen2_5OmniProcessor.from_pretrained(
-            model_path, trust_remote_code=True,
+            model_path, trust_remote_code=True, local_files_only=not allow_download,
+            **({"revision": revision} if revision is not None else {}),
         )
         _loaded_tier = tier
         _loaded_cpu_offload = allow_cpu_offload
+        _loaded_override = override
         logger.info(
             "Model loaded successfully (tier=%s, cpu_offload=%s) in %.2fs.",
             tier,
@@ -397,6 +420,7 @@ def _load_model(tier: str, *, allow_cpu_offload: bool = False) -> None:
         _processor = None
         _loaded_tier = None
         _loaded_cpu_offload = None
+        _loaded_override = None
         if _is_oom_error(exc):
             _clear_cuda_memory()
             raise LocalCaptionOOMError(
@@ -408,7 +432,7 @@ def _load_model(tier: str, *, allow_cpu_offload: bool = False) -> None:
 
 def unload_model() -> None:
     """Free GPU memory occupied by the cached model."""
-    global _model, _processor, _loaded_tier, _loaded_cpu_offload  # noqa: PLW0603
+    global _model, _processor, _loaded_tier, _loaded_cpu_offload, _loaded_override
     if _model is not None:
         del _model
     if _processor is not None:
@@ -417,6 +441,7 @@ def unload_model() -> None:
     _processor = None
     _loaded_tier = None
     _loaded_cpu_offload = None
+    _loaded_override = None
     _clear_cuda_memory()
     logger.info("Local captioner model unloaded — VRAM freed.")
 
@@ -436,6 +461,14 @@ def generate_caption(
     repetition_penalty: Optional[float] = None,
     allow_cpu_offload: bool = False,
     stop_event: Optional[threading.Event] = None,
+    prompt_instructions: Optional[str] = None,
+    system_prompt: Optional[str] = None,
+    model_id: Optional[str] = None,
+    device: Optional[str] = None,
+    allow_download: bool = True,
+    full_audio: bool = False,
+    revision: Optional[str] = None,
+    text_only: bool = False,
 ) -> Optional[str]:
     """Generate a caption for a song using the local Qwen2.5-Omni model.
 
@@ -452,7 +485,8 @@ def generate_caption(
     """
     total_started = time.perf_counter()
     try:
-        _load_model(tier, allow_cpu_offload=allow_cpu_offload)
+        _load_model(tier, allow_cpu_offload=allow_cpu_offload, model_id=model_id,
+                    device=device, allow_download=allow_download, revision=revision, text_only=text_only)
     except ImportError as exc:
         logger.error(
             "Missing dependency for local captioning: %s. "
@@ -502,7 +536,8 @@ def generate_caption(
         for idx, source in enumerate(audio_sources):
             try:
                 build_inputs_started = time.perf_counter()
-                conversation = _build_conversation(title, artist, lyrics_excerpt, source)
+                conversation = _build_conversation(title, artist, lyrics_excerpt, source,
+                    prompt_instructions=prompt_instructions, system_prompt=system_prompt, full_audio=full_audio)
                 text_template, audios, images, videos = _prepare_inputs(conversation)
                 inputs = _processor(
                     text=text_template,

@@ -19,19 +19,21 @@ def _field(name, default, kind, group, help_text, **extra):
 
 
 _FIELDS = [
+    _field("objective", "flow_dpo", "string", "Training", "flow_dpo learns preferences; sft learns directly from single audio targets with flow matching. SFT ignores all preference-only coefficients.", choices=["flow_dpo", "sft"]),
     _field("auto_download", True, "bool", "Model", "Download the default SFT XL checkpoint when no local model was selected; uses the trainer's own checkpoint_dir."),
     _field("checkpoint_dir", "checkpoints", "string", "Model", "Root of the Hugging Face ACE-Step checkpoint directories."),
     _field("checkpoint_file", "", "string", "Model", "Optional original/ComfyUI .safetensors file; needs model_config_dir with matching architecture."),
     _field("model_config_dir", "", "string", "Model", "Local config.json and Python architecture files for checkpoint_file. No model weights need downloading here."),
     _field("model_variant", "xl-sft", "string", "Model", "SFT/base architecture. Preference training of a distilled Turbo is not enabled.", choices=["xl-sft", "sft", "xl-base", "base"]),
     _field("pairs_manifest", "", "string", "Data", "Prepared preference manifest, with tensor_path for every selected pair."),
+    _field("dataset_manifest", "", "string", "Data", "SFT only: prepared supervised JSON, a Side-Step manifest.json, or a directory of .pt tensors. No chosen/rejected pairs are needed."),
     _field("output_dir", "output/quality-lora", "string", "Data", "Run directory; checkpoints, logs, configuration and final adapter are written here."),
-    _field("max_latent_length", 750, "int", "Data", "Aligned random crop in latent frames (ACE usually 25 frames/s); 0 keeps the full recording.", min=0, step=50),
+    _field("max_latent_length", 750, "int", "Data", "Flow-DPO crop in latent frames; 0 preserves prepared clips. SFT defaults to 0 and rejects cropping vocals without aligned clip lyrics.", min=0, step=50),
     _field("dataset_repeats", 1, "int", "Data", "Repeat the training data within each epoch.", min=1),
     _field("verify_checksums", False, "bool", "Data", "Verify cached tensor fingerprints when supported by the dataset."),
     _field("rank", 32, "int", "LoRA", "LoRA rank, for example 16, 32, 64 or 128.", min=1, max=1024),
     _field("alpha", 64.0, "float", "LoRA", "LoRA scaling alpha; inference exports preserve alpha/rank.", min=0.001, step=1),
-    _field("dropout", 0.0, "float", "LoRA", "Adapter dropout, with the same mask for chosen and rejected audio. Base-model dropout stays disabled.", min=0, max=0.95, step=0.01),
+    _field("dropout", 0.0, "float", "LoRA", "Adapter dropout; Flow-DPO shares masks across branches, SFT uses ordinary dropout. Base-model dropout stays disabled.", min=0, max=0.95, step=0.01),
     _field("target_modules", ["q_proj", "k_proj", "v_proj", "o_proj"], "list", "LoRA", "Linear decoder module suffixes; comma-separated or a JSON list."),
     _field("attention_type", "both", "string", "LoRA", "Attention projections to adapt.", choices=["both", "self", "cross"]),
     _field("target_mlp", False, "bool", "LoRA", "Also adapt gate_proj/up_proj/down_proj in the decoder MLPs."),
@@ -50,7 +52,7 @@ _FIELDS = [
     _field("timestep_min", 0.0001, "float", "MR-FlowDPO", "Lower endpoint clamp for sampled timesteps.", min=0, max=0.999),
     _field("timestep_max", 0.9999, "float", "MR-FlowDPO", "Upper endpoint clamp for sampled timesteps.", min=0.001, max=1),
     _field("cfg_dropout", 0.0, "float", "MR-FlowDPO", "Shared condition dropout for both branches. 0 preserves lyrics conditioning on every pair.", min=0, max=1, step=0.01),
-    _field("batch_size", 1, "int", "Training", "Preference pairs per microbatch per GPU; each pair has two audio branches.", min=1),
+    _field("batch_size", 1, "int", "Training", "Examples per microbatch per GPU: one audio branch in SFT, two in Flow-DPO.", min=1),
     _field("gradient_accumulation", 4, "int", "Training", "Microbatches per optimizer update.", min=1),
     _field("epochs", 10, "int", "Training", "Epoch count when max_steps is 0.", min=1),
     _field("max_steps", 0, "int", "Training", "Positive optimizer-step limit overrides epochs; 0 uses epochs.", min=0),
@@ -132,6 +134,8 @@ def validate_config(config: dict[str, Any], *, check_paths: bool = False) -> dic
     if unknown:
         raise ValueError("Unknown training options: " + ", ".join(sorted(unknown)))
     result = defaults | copy.deepcopy(config)
+    if result["objective"] == "sft" and "max_latent_length" not in config:
+        result["max_latent_length"] = 0
     for spec in _FIELDS:
         key, kind = spec["name"], spec["type"]
         value = result[key]
@@ -199,13 +203,16 @@ def validate_config(config: dict[str, Any], *, check_paths: bool = False) -> dic
         raise ValueError("timestep_min must be smaller than timestep_max")
     if result["resume_from"] and result["init_adapter"]:
         raise ValueError("resume_from and init_adapter are mutually exclusive")
-    if not result["pairs_manifest"]:
-        raise ValueError("pairs_manifest is required; preprocess preference pairs first")
+    data_key = "dataset_manifest" if result["objective"] == "sft" else "pairs_manifest"
+    if not result[data_key]:
+        raise ValueError("dataset_manifest is required for SFT; preprocess audio first" if data_key == "dataset_manifest"
+                         else "pairs_manifest is required; preprocess preference pairs first")
     if not result["output_dir"]:
         raise ValueError("output_dir cannot be empty")
     if check_paths:
-        if not Path(result["pairs_manifest"]).is_file():
-            raise FileNotFoundError(f"Preference manifest not found: {result['pairs_manifest']}")
+        data_path = Path(result[data_key])
+        if not data_path.is_file() and not (data_key == "dataset_manifest" and data_path.is_dir()):
+            raise FileNotFoundError(f"Training dataset not found: {data_path}")
         for key in ("resume_from", "init_adapter"):
             if result[key] and not Path(result[key]).is_dir():
                 raise FileNotFoundError(f"{key} directory not found: {result[key]}")

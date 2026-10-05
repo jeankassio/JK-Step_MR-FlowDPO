@@ -1,0 +1,38 @@
+/* Theme editor labels; user theme names, authors and CSS token values stay literal. */
+(() => {
+  const rows = [
+    ['Accent','Destaque','Acento'],['Accent text -- hover, links, focus rings','Texto de destaque — cursor, links e foco','Texto de acento — cursor, enlaces y foco'],
+    ['Background','Fundo','Fondo'],['Badges','Indicadores','Indicadores'],['Bold text -- emphasis','Texto em negrito — ênfase','Texto en negrita — énfasis'],
+    ['Border','Borda','Borde'],['Border focus','Borda em foco','Borde enfocado'],['Border subtle','Borda discreta','Borde sutil'],['Borders','Bordas','Bordes'],
+    ['Changed','Alterado','Modificado'],['Changed text -- edited/non-default values','Texto alterado — valores editados','Texto modificado — valores editados'],
+    ['Data Table','Tabela de dados','Tabla de datos'],['Elevated','Elevado','Elevado'],['Error state','Estado de erro','Estado de error'],
+    ['Error text -- [x] failures, invalid','Texto de erro — [x] falhas e inválidos','Texto de error — [x] fallos y no válidos'],
+    ['Muted','Discreto','Tenue'],['Muted text -- hints, secondary labels','Texto discreto — dicas e rótulos secundários','Texto tenue — consejos y etiquetas secundarias'],
+    ['My Theme','Meu tema','Mi tema'],['Name','Nome','Nombre'],['Neutral','Neutro','Neutro'],['Neutral badge','Indicador neutro','Indicador neutro'],
+    ['New model checkpoint detected.','Novo checkpoint do modelo detectado.','Nuevo checkpoint del modelo detectado.'],
+    ['Normal body text -- default content','Texto normal — conteúdo padrão','Texto normal — contenido predeterminado'],
+    ['Panel','Painel','Panel'],['Preprocessing [ok]','Pré-processamento [ok]','Preprocesamiento [ok]'],['Primary','Primário','Primario'],
+    ['Primary text -- headings, focus, info','Texto primário — títulos, foco e informações','Texto primario — títulos, foco e información'],
+    ['Progress','Progresso','Progreso'],['Quality badge','Indicador de qualidade','Indicador de calidad'],['Quality: High','Qualidade: alta','Calidad: alta'],
+    ['Secondary','Secundário','Secundario'],['Secondary text -- recalled/default values','Texto secundário — valores recuperados ou padrão','Texto secundario — valores recuperados o predeterminados'],
+    ['Semantic Colors','Cores semânticas','Colores semánticos'],['Setup','Configuração','Configuración'],
+    ['Side-Step Theme Editor','Editor de temas JK-Step','Editor de temas JK-Step'],['Side-Step — Theme Editor','JK-Step — Editor de temas','JK-Step — Editor de temas'],
+    ['Size','Tamanho','Tamaño'],['Speed badge','Indicador de velocidade','Indicador de velocidad'],['Speed: Fast','Velocidade: rápida','Velocidad: rápida'],
+    ['Success text -- [ok], confirmed, detected','Texto de sucesso — [ok], confirmado e detectado','Texto de éxito — [ok], confirmado y detectado'],
+    ['Surface','Superfície','Superficie'],['Surface Hierarchy','Hierarquia das superfícies','Jerarquía de superficies'],['Surfaces','Superfícies','Superficies'],
+    ['Tertiary text -- deeply subdued','Texto terciário — muito discreto','Texto terciario — muy tenue'],['Text','Texto','Texto'],['Text Colors','Cores do texto','Colores del texto'],
+    ['Text bold','Texto em negrito','Texto en negrita'],['Text secondary','Texto secundário','Texto secundario'],['Toasts','Notificações','Notificaciones'],
+    ['Training completed successfully. LoRA saved.','Treino concluído. LoRA salva.','Entrenamiento completado. LoRA guardada.'],
+    ['Training epoch 42/100','Época de treino 42/100','Época de entrenamiento 42/100'],['Training failed: CUDA out of memory.','Treino falhou: CUDA sem memória.','Error de entrenamiento: CUDA sin memoria.'],
+    ['VRAM badge','Indicador de VRAM','Indicador de VRAM'],['VRAM usage [!]','Uso de VRAM [!]','Uso de VRAM [!]'],
+    ['VRAM usage is high. Consider reducing batch size.','Uso de VRAM alto. Considere reduzir o lote.','Uso de VRAM alto. Considere reducir el lote.'],
+    ['Warning','Aviso','Aviso'],['Warning text -- [!] caution, stale states','Texto de aviso — [!] cuidado e estados antigos','Texto de aviso — [!] precaución y estados antiguos'],
+    ['Your name','Seu nome','Su nombre'],['[export lora]','[exportar lora]','[exportar lora]'],['[export]','[exportar]','[exportar]'],['[import]','[importar]','[importar]'],
+    ['[presets]','[presets]','[presets]'],['[save]','[salvar]','[guardar]'],['[start training]','[iniciar treino]','[iniciar entrenamiento]'],['[stop]','[parar]','[detener]'],
+    ['Ready. Edit colors and see changes live.','Pronto. Edite as cores e veja as alterações ao vivo.','Listo. Edite los colores y vea los cambios en directo.'],
+    ['Theme name is required','Informe o nome do tema','Introduzca el nombre del tema'],['Theme Name','Nome do tema','Nombre del tema'],['Author','Autor','Autor'],
+    ['Background Image','Imagem de fundo','Imagen de fondo'],['https://... or leave empty','https://... ou deixe vazio','https://... o déjelo vacío'],
+    ['Load existing theme','Carregar tema existente','Cargar tema existente'],['Save theme','Salvar tema','Guardar tema'],['Typography','Tipografia','Tipografía'],
+  ];
+  window.JK_LEGACY_THEME_MESSAGES = Object.fromEntries(rows.map(([en,pt,es]) => [en,{en,pt,es}]));
+})();

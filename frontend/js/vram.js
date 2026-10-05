@@ -161,7 +161,7 @@ const VRAM = (() => {
   function getVerdict() {
     const el = $('ez-vram-status');
     if (!el) return 'unknown';
-    const text = el.textContent || '';
+    const text = (window.jkSourceText ? window.jkSourceText(el) : el.textContent) || '';
     if (text.includes('WILL OOM')) return 'red';
     if (text.includes('tight fit')) return 'yellow';
     if (text.includes('fits')) return 'green';

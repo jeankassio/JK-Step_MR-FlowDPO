@@ -18,6 +18,28 @@ def test_cli_overrides_all_config_types():
     assert args.rank_pattern["layers.0.self_attn.q_proj"] == 16
 
 
+def test_folder_dataset_cli_inspects_without_models(tmp_path, capsys):
+    (tmp_path / "song.wav").write_bytes(b"not decoded during inventory")
+    (tmp_path / "ignored.txt").write_text("irrelevant")
+    assert main(["dataset", "inspect", "--audio-dir", str(tmp_path)]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["count"] == 1
+    parsed = _parser().parse_args(["dataset", "prepare", "--audio-dir", str(tmp_path),
+                                  "--options", '{"language":"pt"}'])
+    assert parsed.audio_dir == str(tmp_path)
+
+
+def test_sft_presets_and_cli_do_not_require_preference_pairs(tmp_path):
+    from jk_step.cli import get_presets
+    from jk_step.config import validate_config
+    preset = get_presets()["sft_lora"]
+    config = validate_config({**preset, "dataset_manifest": str(tmp_path / "supervised.json")})
+    assert config["objective"] == "sft" and config["max_latent_length"] == 0
+    assert not config["pairs_manifest"]
+    parsed = _parser().parse_args(["train", "--objective", "sft", "--dataset-manifest", "data.json"])
+    assert parsed.objective == "sft" and parsed.dataset_manifest == "data.json"
+
+
 def test_multi_gpu_options_and_toolkit_compatibility():
     from jk_step.config import validate_config
     args = _parser().parse_args(["train", "--multi-gpu", "--gpu-ids", "0,1",

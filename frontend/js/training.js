@@ -76,7 +76,7 @@ const Training = (() => {
   }
 
   async function _openOutputDirFromMonitor() {
-    const dir = $('monitor-output-dir')?.textContent?.replace('Output: ', '').trim() || '';
+    const dir = jkSourceText($('monitor-output-dir')).replace('Output: ', '').trim() || '';
     if (!dir) {
       if (typeof showToast === 'function') showToast('No output directory available', 'warn');
       return;
@@ -1301,7 +1301,7 @@ const Training = (() => {
       { k: 'Checkpointing', v: c.gradient_checkpointing_ratio || 'full' },
     ];
     const rowsHtml = rows.map(({ k, v, raw }) =>
-      `<div style="display:flex;justify-content:space-between;padding:3px 0;gap:12px;"><span class="u-text-muted" style="white-space:nowrap;flex-shrink:0;">${_esc(k)}</span><span title="${_esc(raw || String(v))}" style="text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:220px;">${_esc(v)}</span></div>`
+      `<div style="display:flex;justify-content:space-between;padding:3px 0;gap:12px;"><span class="u-text-muted" style="white-space:nowrap;flex-shrink:0;">${_esc(k)}</span><span data-no-i18n title="${_esc(raw || String(v))}" style="text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:220px;">${_esc(v)}</span></div>`
     ).join('');
     panel.innerHTML = rowsHtml +
       '<div style="margin-top:var(--space-sm);display:flex;justify-content:flex-end;">' +
@@ -1624,8 +1624,8 @@ const Training = (() => {
       const ds = _esc(_pathBasename(entry.config.dataset_dir || ''));
       rows.push('<div style="display:flex;align-items:center;gap:var(--space-sm);padding:3px 0;">' +
         '<span class="u-text-success">[...]</span> ' +
-        '<span>' + name + '</span>' +
-        (ds ? '<span class="u-text-muted" style="font-size:var(--font-size-xs);">' + ds + '</span>' : '') +
+        '<span data-no-i18n>' + name + '</span>' +
+        (ds ? '<span data-no-i18n class="u-text-muted" style="font-size:var(--font-size-xs);">' + ds + '</span>' : '') +
         '<span class="u-text-muted" style="margin-left:auto;font-size:var(--font-size-xs);">running</span>' +
         '</div>');
     });
@@ -1634,8 +1634,8 @@ const Training = (() => {
       const ds = _esc(_pathBasename(entry.config.dataset_dir || ''));
       rows.push('<div style="display:flex;align-items:center;gap:var(--space-sm);padding:3px 0;">' +
         '<span class="u-text-muted">[--]</span> ' +
-        '<span>' + name + '</span>' +
-        (ds ? '<span class="u-text-muted" style="font-size:var(--font-size-xs);">' + ds + '</span>' : '') +
+        '<span data-no-i18n>' + name + '</span>' +
+        (ds ? '<span data-no-i18n class="u-text-muted" style="font-size:var(--font-size-xs);">' + ds + '</span>' : '') +
         '<button class="btn btn--sm" data-queue-remove="' + entry.id + '" style="margin-left:auto;">[x]</button>' +
         '</div>');
     });

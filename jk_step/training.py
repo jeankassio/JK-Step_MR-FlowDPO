@@ -1,9 +1,11 @@
-"""ACE-Step decoder LoRA preference training for JK-Step MR-FlowDPO.
+"""ACE-Step decoder LoRA preference and supervised training for JK-Step.
 
 The reference is the original frozen checkpoint, evaluated by disabling PEFT
 adapters.  It is never a second copy of the XL model.  The actual objective is
 the published velocity-error Flow-DPO objective, not supervised fine-tuning
 renamed DPO.  Multi-reward selection belongs to the preference-data builder.
+The optional sft objective uses a single target and ordinary masked flow
+matching, with no rejected audio or frozen-reference forward.
 
 ML imports are local to the entry points so CLI help/UI configuration remains
 available on a fresh installation.
@@ -21,6 +23,7 @@ import shutil
 import time
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
@@ -215,11 +218,12 @@ def _inject_adapter(model: Any, config: dict) -> tuple[Any, list[Any]]:
                              rank_pattern=config["rank_pattern"], alpha_pattern=config["alpha_pattern"],
                              bias="none", use_rslora=config["use_rslora"])
         model.decoder = get_peft_model(model.decoder, adapter, autocast_adapter_dtype=True)
-    for module in model.decoder.modules():
-        if hasattr(module, "lora_dropout"):
-            for adapter_name, dropout in module.lora_dropout.items():
-                probability = float(getattr(dropout, "p", 0.0))
-                module.lora_dropout[adapter_name] = _paired_dropout(probability)
+    if config.get("objective", "flow_dpo") == "flow_dpo":
+        for module in model.decoder.modules():
+            if hasattr(module, "lora_dropout"):
+                for adapter_name, dropout in module.lora_dropout.items():
+                    probability = float(getattr(dropout, "p", 0.0))
+                    module.lora_dropout[adapter_name] = _paired_dropout(probability)
     parameters = []
     for name, parameter in model.named_parameters():
         if parameter.requires_grad:
@@ -375,6 +379,103 @@ def preference_step(model: Any, batch: dict, config: dict, *, training: bool = T
                          reference_regularization=config["reference_regularization"])
 
 
+@dataclass
+class SupervisedStepResult:
+    loss: Any
+    chosen_fm: Any
+
+
+def _predict_supervised(decoder: Any, xt: Any, timestep: Any, batch: dict,
+                        *, require_input_grads: bool) -> Any:
+    """One branch per example, trimmed before XL's mask-ignoring decoder."""
+    import torch
+    import torch.nn.functional as F
+    lengths = _prefix_lengths(batch["attention_mask"], "attention_mask")
+    encoder_lengths = _prefix_lengths(batch["encoder_attention_mask"], "encoder_attention_mask")
+    grouped = defaultdict(list)
+    for index, shape in enumerate(zip(lengths, encoder_lengths)):
+        grouped[shape].append(index)
+    predictions = [None] * len(lengths)
+    for (length, encoder_length), indices in grouped.items():
+        hidden = xt[indices, :length]
+        if require_input_grads:
+            hidden = hidden.requires_grad_(True)
+        times = timestep[indices]
+        outputs = decoder(hidden_states=hidden, timestep=times, timestep_r=times,
+            attention_mask=batch["attention_mask"][indices, :length],
+            encoder_hidden_states=batch["encoder_hidden_states"][indices, :encoder_length],
+            encoder_attention_mask=batch["encoder_attention_mask"][indices, :encoder_length],
+            context_latents=batch["context_latents"][indices, :length], use_cache=False)
+        prediction = outputs[0] if isinstance(outputs, (tuple, list)) else outputs
+        if hasattr(prediction, "sample"):
+            prediction = prediction.sample
+        if prediction.shape != hidden.shape:
+            raise ValueError(f"Decoder returned {tuple(prediction.shape)}, expected {tuple(hidden.shape)}")
+        for local, index in enumerate(indices):
+            predictions[index] = F.pad(prediction[local], (0, 0, 0, xt.shape[1] - length))
+    return torch.stack(predictions)
+
+
+def supervised_step(model: Any, batch: dict, config: dict, *, training: bool = True) -> SupervisedStepResult:
+    """Continuous single-target ACE flow matching; loss reduces in FP32.
+
+    Preference coefficients (beta, label smoothing, pair weights and reference/
+    chosen FM regularization) have no effect on this objective.
+    """
+    import torch
+    device, _, dtype = _hardware(config)
+    batch = {key: value.to(device, dtype=(torch.float32 if key in
+                ("target_latents", "attention_mask", "encoder_attention_mask") else dtype)
+                if value.is_floating_point() else None, non_blocking=device.type == "cuda")
+             if isinstance(value, torch.Tensor) else value for key, value in batch.items()}
+    target = batch["target_latents"]
+    if target.ndim != 3 or target.shape[-1] != 64 or not torch.isfinite(target).all():
+        raise ValueError("Supervised target_latents must be finite [B,T,64] tensors")
+    size = target.shape[0]
+    if config["cfg_dropout"]:
+        null = getattr(model, "null_condition_emb", None)
+        if null is None:
+            raise ValueError("CFG dropout requested but model has no null_condition_emb")
+        dropped = torch.rand(size, 1, 1, device=device) < config["cfg_dropout"]
+        batch["encoder_hidden_states"] = torch.where(dropped,
+            null.to(device=device, dtype=dtype).expand_as(batch["encoder_hidden_states"]),
+            batch["encoder_hidden_states"])
+    if config["timestep_sampling"] == "uniform":
+        timestep = torch.rand(size, device=device, dtype=torch.float32)
+    else:
+        draws = torch.randn(2, size, device=device, dtype=torch.float32)
+        timestep = torch.sigmoid(draws * config["timestep_sigma"] + config["timestep_mu"]).amax(dim=0)
+    timestep = timestep.clamp(config["timestep_min"], config["timestep_max"])
+    noise = torch.randn(target.shape, device=device, dtype=torch.float32)
+    times = timestep[:, None, None]
+    xt = (times * noise + (1 - times) * target.float()).to(dtype)
+    velocity_target = noise - target.float()
+    _policy_mode(model.decoder, training)
+    with _autocast(device, dtype):
+        prediction = _predict_supervised(model.decoder, xt, timestep, batch,
+            require_input_grads=training and config["gradient_checkpointing"])
+    # Reduce each example over valid frames/channels, then average examples.
+    # Padding cannot affect the forward or the loss, even in variable batches.
+    mask = batch["attention_mask"].float()
+    squared = (prediction.float() - velocity_target).square().mean(dim=-1)
+    per_sample = (squared * mask).sum(dim=1) / mask.sum(dim=1).clamp_min(1)
+    return SupervisedStepResult(per_sample.mean(), per_sample)
+
+
+def _training_step(model: Any, batch: dict, config: dict, *, training: bool = True) -> Any:
+    function = supervised_step if config.get("objective", "flow_dpo") == "sft" else preference_step
+    return function(model, batch, config, training=training)
+
+
+def _step_metrics(result: Any, objective: str) -> dict:
+    metrics = {"loss": result.loss, "chosen_fm": result.chosen_fm.mean()}
+    if objective == "flow_dpo":
+        metrics.update(dpo_loss=result.dpo_loss, rejected_fm=result.rejected_fm.mean(),
+                       preference_margin=result.preference_logits.mean(),
+                       preference_accuracy=(result.preference_logits > 0).float().mean())
+    return metrics
+
+
 def _rng_capture(device) -> dict:
     import torch
     state = {"python": random.getstate(), "torch": torch.get_rng_state()}
@@ -400,6 +501,9 @@ def _rng_restore(state: dict, device) -> None:
 
 
 def _split_datasets(config: dict) -> tuple[Any, Any]:
+    if config.get("objective", "flow_dpo") == "sft":
+        from jk_step.supervised_data import split_supervised_datasets
+        return split_supervised_datasets(config)
     from jk_step.preprocess import PreferenceTensorDataset
     from jk_step.pairs import read_manifest
     document, base = read_manifest(config["pairs_manifest"])
@@ -608,20 +712,24 @@ def _evaluate(model, loader, config, device, distributed=None) -> dict:
     torch.manual_seed(eval_seed)
     if device.type == "cuda":
         torch.cuda.manual_seed(eval_seed)
-    totals = {key:0.0 for key in ("validation_loss","validation_dpo",
-              "validation_preference_accuracy","validation_chosen_fm")}
+    objective = config.get("objective", "flow_dpo")
+    keys = ("validation_loss", "validation_chosen_fm") if objective == "sft" else (
+        "validation_loss", "validation_dpo", "validation_preference_accuracy", "validation_chosen_fm")
+    totals = {key:0.0 for key in keys}
     count, weight_mass = 0.0, 0.0
     try:
         with torch.no_grad():
             for index, batch in enumerate(loader):
                 if config["eval_batches"] and index >= config["eval_batches"]:
                     break
-                result = preference_step(model, batch, config, training=False)
-                size = batch['chosen_latents'].shape[0]
-                mass = float(batch["pair_weight"].sum()) if config["pair_weighting"] and "pair_weight" in batch else size
+                result = _training_step(model, batch, config, training=False)
+                size = batch["target_latents" if objective == "sft" else "chosen_latents"].shape[0]
+                mass = (float(batch["pair_weight"].sum())
+                        if objective == "flow_dpo" and config["pair_weighting"] and "pair_weight" in batch else size)
                 totals["validation_loss"] += float(result.loss) * mass
-                totals["validation_dpo"] += float(result.dpo_loss) * mass
-                totals["validation_preference_accuracy"] += float((result.preference_logits > 0).float().mean()) * size
+                if objective == "flow_dpo":
+                    totals["validation_dpo"] += float(result.dpo_loss) * mass
+                    totals["validation_preference_accuracy"] += float((result.preference_logits > 0).float().mean()) * size
                 totals["validation_chosen_fm"] += float(result.chosen_fm.mean()) * size
                 count += size
                 weight_mass += mass
@@ -698,8 +806,11 @@ def _run_training_worker(config: dict, *, progress=None, stop_event=None,
     from torch.utils.data import DataLoader
     from jk_step.preprocess import collate_pairs
     config = validate_config(config, check_paths=False)
-    if not Path(config["pairs_manifest"]).is_file():
-        raise FileNotFoundError(f"Preference manifest not found: {config['pairs_manifest']}")
+    objective = config["objective"]
+    data_key = "dataset_manifest" if objective == "sft" else "pairs_manifest"
+    data_path = Path(config[data_key])
+    if not data_path.is_file() and not (objective == "sft" and data_path.is_dir()):
+        raise FileNotFoundError(f"Training dataset not found: {data_path}")
     if distributed.is_main:
         config = resolve_training_model(config,progress)
     if distributed.active:
@@ -720,7 +831,11 @@ def _run_training_worker(config: dict, *, progress=None, stop_event=None,
     if device.type == "cuda":
         torch.cuda.manual_seed(config["seed"])
     train_data, validation_data = _split_datasets(config)
-    loader_options = dict(batch_size=config["batch_size"], collate_fn=collate_pairs,
+    collate = collate_pairs
+    if objective == "sft":
+        from jk_step.supervised_data import collate_supervised
+        collate = collate_supervised
+    loader_options = dict(batch_size=config["batch_size"], collate_fn=collate,
                           num_workers=config["num_workers"],
                           pin_memory=config["pin_memory"] and device.type == "cuda")
     train_sampler = None
@@ -733,13 +848,17 @@ def _run_training_worker(config: dict, *, progress=None, stop_event=None,
     steps_per_epoch = math.ceil(batches_per_epoch / config["gradient_accumulation"])
     total_steps = config["max_steps"] or config["epochs"] * steps_per_epoch
     total_epochs = math.ceil(total_steps / steps_per_epoch) if config["max_steps"] else config["epochs"]
-    fingerprint = hashlib.sha256(Path(config["pairs_manifest"]).read_bytes()).hexdigest()
+    if objective == "sft":
+        from jk_step.supervised_data import supervised_manifest_fingerprint
+        fingerprint = supervised_manifest_fingerprint(config["dataset_manifest"])
+    else:
+        fingerprint = hashlib.sha256(Path(config["pairs_manifest"]).read_bytes()).hexdigest()
     log_file = output / "metrics.jsonl"
     writer = None
     def emit(event: str, **values):
         if not distributed.is_main:
             return
-        record = {"event": event, "time": time.time(), **values}
+        record = {"event": event, "time": time.time(), "objective": objective, **values}
         with log_file.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
         if progress:
@@ -776,14 +895,16 @@ def _run_training_worker(config: dict, *, progress=None, stop_event=None,
                    "best_validation_loss": None, "manifest_sha256": fingerprint,
                    "base_fingerprint": _base_fingerprint(config),
                    "world_size":distributed.world_size,
-                   "total_steps": total_steps}
+                   "total_steps": total_steps, "objective": objective}
         if config["resume_from"]:
             state_path = Path(config["resume_from"]) / "training_state.pt"
             state = torch.load(state_path, map_location="cpu", weights_only=True)
             if state.get("format") != "JK-Step MR-FlowDPO" or state.get("version") != 1:
                 raise ValueError("resume_from is not a supported JK-Step MR-FlowDPO checkpoint")
+            if state["config"].get("objective", "flow_dpo") != objective:
+                raise ValueError("Resume objective changed; use init_adapter for a new training setup")
             if state["runtime"]["manifest_sha256"] != fingerprint:
-                raise ValueError("The preference manifest changed since the checkpoint; start a new run with init_adapter")
+                raise ValueError("The training dataset changed since the checkpoint; start a new run with init_adapter")
             if state["runtime"].get("base_fingerprint") != runtime["base_fingerprint"]:
                 raise ValueError("Base checkpoint/configuration changed since the checkpoint; restore the original base or use init_adapter")
             if state['runtime'].get('world_size',1) != distributed.world_size:
@@ -797,7 +918,10 @@ def _run_training_worker(config: dict, *, progress=None, stop_event=None,
                           "weight_decay", "adam_beta1", "adam_beta2", "adam_epsilon", "max_grad_norm",
                           "seed", "validation_fraction", "precision", "device",
                           "checkpoint_file", "model_config_dir", "checkpoint_dir", "model_variant",
-                          "multi_gpu","gpu_ids","distributed_backend")
+                          "multi_gpu","gpu_ids","distributed_backend", "objective")
+            if objective == "sft":
+                ignored = {"beta", "fm_regularization", "reference_regularization", "label_smoothing", "pair_weighting"}
+                invariants = tuple(key for key in invariants if key not in ignored) + ("dataset_manifest",)
             changed = [key for key in invariants if state["config"].get(key,portable_config.get(key)) != portable_config.get(key)]
             if changed:
                 raise ValueError("Resume configuration changed: " + ", ".join(changed) + ". Use init_adapter for a new training setup.")
@@ -815,10 +939,14 @@ def _run_training_worker(config: dict, *, progress=None, stop_event=None,
             _rng_restore(states[distributed.rank] if states else state["rng"], device)
         if distributed.is_main:
             _json_write(output / "training_config.json", portable_config)
-        emit("started", step=runtime["global_step"], total_steps=total_steps,
-             train_pairs=len(train_data), validation_pairs=len(validation_data) if validation_data else 0,
-             trainable_parameters=sum(p.numel() for p in parameters), message="MR-FlowDPO preference training",
-             world_size=distributed.world_size,local_train_pairs=local_samples,
+        counts = ({"train_samples": len(train_data), "validation_samples": len(validation_data) if validation_data else 0,
+                   "local_train_samples": local_samples} if objective == "sft" else {
+                   "train_pairs": len(train_data), "validation_pairs": len(validation_data) if validation_data else 0,
+                   "local_train_pairs": local_samples})
+        emit("started", step=runtime["global_step"], total_steps=total_steps, **counts,
+             trainable_parameters=sum(p.numel() for p in parameters),
+             message="SFT single-target flow matching" if objective == "sft" else "MR-FlowDPO preference training",
+             world_size=distributed.world_size,
              effective_batch_size=config['batch_size']*config['gradient_accumulation']*distributed.world_size,
              distributed_backend=distributed.backend)
         if validation_data and hasattr(validation_data, "set_epoch"):
@@ -862,22 +990,19 @@ def _run_training_worker(config: dict, *, progress=None, stop_event=None,
                     window = min(config["gradient_accumulation"], batches_per_epoch - batch_index)
                     microbatches = [next(iterator) for _ in range(window)]
                     masses = [float(batch["pair_weight"].sum())
-                              if config["pair_weighting"] and "pair_weight" in batch
-                              else float(batch["chosen_latents"].shape[0]) for batch in microbatches]
+                              if objective == "flow_dpo" and config["pair_weighting"] and "pair_weight" in batch
+                              else float(batch["target_latents" if objective == "sft" else "chosen_latents"].shape[0])
+                              for batch in microbatches]
                     if distributed.any(any(not math.isfinite(mass) or mass <= 0 for mass in masses)):
-                        raise ValueError("Every microbatch must have positive finite preference weight")
+                        raise ValueError("Every microbatch must have positive finite example weight")
                     total_mass = distributed.sum(sum(masses))
                     sums = defaultdict(float)
                     for batch, mass in zip(microbatches, masses):
-                        result = preference_step(model, batch, config, training=True)
+                        result = _training_step(model, batch, config, training=True)
                         if distributed.any(not bool(torch.isfinite(result.loss))):
-                            raise FloatingPointError("Non-finite preference loss; inspect cached tensors, beta and learning rate")
+                            raise FloatingPointError("Non-finite training loss; inspect cached tensors and learning rate")
                         scaler.scale(result.loss * (mass / total_mass)).backward()
-                        for key, value in (("loss", result.loss), ("dpo_loss", result.dpo_loss),
-                                           ("chosen_fm", result.chosen_fm.mean()),
-                                           ("rejected_fm", result.rejected_fm.mean()),
-                                           ("preference_margin", result.preference_logits.mean()),
-                                           ("preference_accuracy", (result.preference_logits > 0).float().mean())):
+                        for key, value in _step_metrics(result, objective).items():
                             sums[key] += float(value.detach()) * (mass / total_mass)
                         batch_index += 1
                     scaler.unscale_(optimizer)
@@ -938,7 +1063,8 @@ def _run_training_worker(config: dict, *, progress=None, stop_event=None,
         result = {"status": "stopped" if stopped else "complete", "step": runtime["global_step"],
                   "total_steps": total_steps, "adapter_dir": str(saved),
                   "output_dir": str(output), "metrics_path": str(log_file),
-                  "world_size":distributed.world_size,"distributed_backend":distributed.backend}
+                  "world_size":distributed.world_size,"distributed_backend":distributed.backend,
+                  "objective": objective}
         if config["export_comfyui"] and distributed.is_main:
             export = export_adapter(saved, output / ("stopped_comfyui.safetensors" if stopped else "quality_comfyui.safetensors"),
                                     target=config["comfyui_target"], decoder=model.decoder)

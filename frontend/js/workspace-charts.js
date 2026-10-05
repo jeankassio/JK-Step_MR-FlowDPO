@@ -11,7 +11,7 @@ const WorkspaceCharts = (() => {
   /* ---- TensorBoard Button ---- */
   function initTensorBoardBtn() {
     $("btn-open-tensorboard")?.addEventListener("click", async () => {
-      const outputDir = $("monitor-output-dir")?.textContent?.replace("Output: ", "").trim() || "";
+      const outputDir = jkSourceText($("monitor-output-dir")).replace("Output: ", "").trim() || "";
       const logDir = $("full-log-dir")?.value || (outputDir ? outputDir + "/runs" : "");
       const port = 6006;
       try {

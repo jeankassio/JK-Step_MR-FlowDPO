@@ -82,6 +82,22 @@ def test_existing_security_and_all_schema_fields(ui):
                        json={"kind": "unknown"}).status_code == 400
 
 
+@pytest.mark.parametrize('language,expected', [('en-US','Required field: audio_dir'),
+    ('pt-BR','Campo obrigatório: audio_dir'), ('es-ES','Campo obligatorio: audio_dir')])
+def test_api_localizes_errors_without_changing_field_names(ui, language, expected):
+    client, _ = ui
+    response = client.post('/api/mrflow/datasets/inspect', json={},
+                           headers={**HEADERS, 'Accept-Language':language})
+    assert response.status_code == 422 and response.json()['detail'] == expected
+
+
+def test_api_localization_preserves_unknown_diagnostics_and_json_data():
+    from jk_step.ui_messages import localize_error
+    assert localize_error('Cannot read E:/songs/ação.mp3', 'es') == 'Cannot read E:/songs/ação.mp3'
+    assert localize_error({'parameter':'rank','value':64}, 'pt') == {'parameter':'rank','value':64}
+    assert localize_error('O processo terminou com código 2. Consulte o log.', 'es') == 'El proceso terminó con código 2. Revisa el registro.'
+
+
 def test_pair_validation_preview_and_authenticated_audio(ui, tmp_path):
     client, _ = ui
     manifest, _ = audio_pair(tmp_path)
@@ -198,6 +214,83 @@ def test_model_setup_uses_cli_contract_without_downloading(ui, monkeypatch, tmp_
     report = wait_job(manager, job["id"])
     assert report["job"]["status"] == "completed"
     assert commands[0][-5:] == ["models", "setup", "--checkpoint-dir", str(tmp_path / "checkpoints"), "--weights-only"]
+
+
+def test_folder_inventory_preview_and_audio_are_authenticated(ui, tmp_path):
+    client, _ = ui
+    _, paths = audio_pair(tmp_path)
+    (tmp_path / "chosen.txt").write_text("caption: Piano and voice\nlyrics: One two three", "utf-8")
+    body = {"audio_dir": str(tmp_path)}
+    assert client.post("/api/mrflow/datasets/inspect", json=body).status_code == 401
+    inventory = client.post("/api/mrflow/datasets/inspect", headers=HEADERS, json=body)
+    assert inventory.status_code == 200 and inventory.json()["count"] == 2
+    assert client.post("/api/mrflow/datasets/inspect", headers=HEADERS,
+                       json={"audio_dir": str(tmp_path / "missing")}).status_code == 422
+    manifest = tmp_path / "dataset.json"
+    manifest.write_text(json.dumps({"samples": [{"audio_path": "chosen.wav",
+        "caption": "Piano and voice", "lyrics": "One two three"}]}), "utf-8")
+    preview = client.post("/api/mrflow/datasets/preview", headers=HEADERS,
+                          json={"manifest": str(manifest)})
+    assert preview.status_code == 200 and preview.json()["count"] == 1
+    assert preview.json()["samples"][0]["audio_path"] == str(paths[0].resolve())
+    params = {"manifest": str(manifest), "index": 0}
+    assert client.get("/api/mrflow/datasets/audio", params=params).status_code == 401
+    audio = client.get("/api/mrflow/datasets/audio", params=params, headers=HEADERS)
+    assert audio.status_code == 200 and audio.content.startswith(b"RIFF")
+    assert client.get("/api/mrflow/datasets/audio", params={**params, "index": -1},
+                      headers=HEADERS).status_code == 422
+    report_path = tmp_path / "preparation_report.json"
+    report_path.write_text(json.dumps({"status": "partial", "ready": True,
+        "quarantine": [{"source_audio_path": "bad.wav", "reason": "No usable transcript"}],
+        "samples": 1, "preprocessed": 1}), "utf-8")
+    body = {"report": str(report_path)}
+    assert client.post("/api/mrflow/datasets/report", json=body).status_code == 401
+    report = client.post("/api/mrflow/datasets/report", headers=HEADERS, json=body)
+    assert report.status_code == 200 and report.json()["quarantined"] == 1
+    assert report.json()["quarantine"][0]["reason"] == "No usable transcript"
+
+
+@pytest.mark.parametrize("result,status", [
+    ({"ready": True, "status": "ready", "cancelled": False}, "completed"),
+    ({"ready": True, "status": "partial", "cancelled": False}, "completed"),
+    ({"ready": False, "status": "failed", "cancelled": False}, "failed"),
+    ({"ready": False, "status": "cancelled", "cancelled": True}, "cancelled"),
+])
+def test_folder_preparation_job_contract_and_success_gate(ui, monkeypatch, tmp_path, result, status):
+    _, manager = ui
+    commands = []
+    class FakeProcess:
+        pid = 123456789
+        def __init__(self, command, **kwargs):
+            commands.append(command)
+            self.stdout = io.StringIO(json.dumps({"event": "result", "result": result}) + "\n")
+        def wait(self):
+            return 0
+    monkeypatch.setattr(web.subprocess, "Popen", FakeProcess)
+    job = manager.start("prepare_dataset", {"audio_dir": str(tmp_path)})
+    report = wait_job(manager, job["id"])
+    assert report["job"]["status"] == status
+    assert commands[0][2:6] == ["-m", "jk_step", "dataset", "prepare"]
+    saved = json.loads(Path(job["config_path"]).read_text("utf-8"))
+    assert saved["audio_dir"] == str(tmp_path.resolve())
+    with pytest.raises(HTTPException) as error:
+        manager.start("prepare_dataset", {"audio_dir": str(tmp_path / "missing")})
+    assert error.value.status_code == 422
+
+
+def test_cancelled_legacy_worker_keeps_model_operation_mutex(ui):
+    _, manager = ui
+    worker = SimpleNamespace(thread=Mock(), process=None, status="cancelled")
+    worker.thread.is_alive.return_value = True
+    legacy = SimpleNamespace(active_operation=lambda: None, _lock=__import__("threading").RLock(),
+                             _tasks={"worker": worker}, _training_task=None)
+    manager.task_manager = legacy
+    assert manager._toolkit_busy()
+    with pytest.raises(HTTPException) as error:
+        manager.start("model_setup", {"checkpoint_dir": "checkpoints"})
+    assert error.value.status_code == 409
+    worker.thread.is_alive.return_value = False
+    assert not manager._toolkit_busy()
 
 
 @pytest.mark.parametrize("platform,kind", [("nt", "model_setup"), ("posix", "model_setup"), ("nt", "train")])

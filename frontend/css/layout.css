@@ -112,9 +112,14 @@
   user-select: none;
   z-index: 10;
   min-height: 42px;
+  flex-wrap: wrap;
   /* -webkit-app-region removed: frameless=False uses system decorations;
      drag regions blocked clicks in pywebview/Qt WebEngine */
 }
+
+.legacy-language-label { display: flex; align-items: center; gap: 6px; font-size: var(--font-size-xs); color: var(--muted); }
+.legacy-language-picker { max-width: 115px; min-height: 30px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); color: var(--text); font: inherit; }
+.legacy-language-picker:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 .topbar__logo {
   font-weight: bold;

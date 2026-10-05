@@ -279,11 +279,16 @@ def align_dataset(manifest, output, *, device="cpu", model_cache=".cache/mms_fa"
                   song_ids=(), chunk_seconds=20, context_seconds=2, dtype="float16", min_seconds=8,
                   max_seconds=30, max_gap=5, padding=.25, min_line_score=.35,
                   max_low_character_fraction=.25, max_word_seconds=8, max_trellis_mb=512,
-                  backend="auto", progress=None) -> dict:
+                  backend="auto", cache_only=False, progress=None) -> dict:
     import numpy as np
     import soundfile as sf
     import torch
     import torchaudio
+    if dtype not in ("float16", "float32") or backend not in ("auto", "native", "numpy"):
+        raise ValueError("Unsupported inference dtype or CTC backend")
+    # The CLI passes floats and the Python defaults are integers. Canonicalize
+    # these inference settings so both interfaces reuse the same cache key.
+    chunk_seconds, context_seconds = float(chunk_seconds), float(context_seconds)
     numeric = [chunk_seconds, context_seconds, min_seconds, max_seconds, max_gap, padding, min_line_score, max_low_character_fraction, max_word_seconds, max_trellis_mb]
     if not all(math.isfinite(float(x)) for x in numeric) or not 0 < min_seconds <= max_seconds or not 0 <= min_line_score <= 1 or not 0 <= max_low_character_fraction <= 1 or padding < 0 or 2 * padding >= max_seconds or max_gap < 0 or max_word_seconds <= 0 or max_trellis_mb <= 0:
         raise ValueError("Invalid duration, memory or confidence parameters")
@@ -298,17 +303,17 @@ def align_dataset(manifest, output, *, device="cpu", model_cache=".cache/mms_fa"
         tracks = tracks[:max_songs]
     if not tracks:
         raise ValueError("No selected source songs")
+    if cache_only and not (Path(model_cache).expanduser() / "model.pt").is_file():
+        raise ValueError("Cache-only mode requires the pinned model provenance already on disk; it never downloads a model")
     model_path, model_origin = ensure_model(model_cache, progress)
     bundle = torchaudio.pipelines.MMS_FA
     dictionary = bundle.get_dict(star=None)
-    model = bundle.get_model(with_star=False, dl_kwargs={"model_dir": str(model_path.parent)}).to(device=device, dtype=torch.float16 if dtype == "float16" and str(device).startswith("cuda") else torch.float32).eval()
-    if str(device).startswith("cuda"):
-        torch.cuda.reset_peak_memory_stats(device)
+    model = None
     parameters = {"method_version": METHOD_VERSION, "chunk_seconds": chunk_seconds, "context_seconds": context_seconds,
-                  "dtype": dtype if str(device).startswith("cuda") else "float32", "min_seconds": min_seconds,
+                  "dtype": dtype if cache_only or str(device).startswith("cuda") else "float32", "min_seconds": min_seconds,
                   "max_seconds": max_seconds, "max_gap": max_gap, "padding": padding, "min_line_score": min_line_score,
                   "max_low_character_fraction": max_low_character_fraction, "max_word_seconds": max_word_seconds,
-                  "max_trellis_mb": max_trellis_mb, "ctc_backend": backend}
+                  "max_trellis_mb": max_trellis_mb, "ctc_backend": backend, "cache_only": bool(cache_only)}
     samples, quarantined, full_tracks, counts = [], [], [], Counter()
     for track_number, source in enumerate(tracks, 1):
         song_id = str(source.get("song_id", source.get("id", "")))
@@ -339,6 +344,12 @@ def align_dataset(manifest, output, *, device="cpu", model_cache=".cache/mms_fa"
                 aligned, actual_backend = cached["lines"], cached["ctc_backend"]
                 counts["cached_alignments"] += 1
             else:
+                if cache_only:
+                    raise ValueError(f"No cached {parameters['dtype']} alignment for {song_id}; cache-only mode never runs inference")
+                if model is None:
+                    model = bundle.get_model(with_star=False, dl_kwargs={"model_dir": str(model_path.parent)}).to(device=device, dtype=torch.float16 if dtype == "float16" and str(device).startswith("cuda") else torch.float32).eval()
+                    if str(device).startswith("cuda"):
+                        torch.cuda.reset_peak_memory_stats(device)
                 if progress:
                     progress({"event": "align_start", "song_id": song_id, "song": track_number, "songs": len(tracks), "seconds": duration, "tokens": len(tokens)})
                 emissions = emissions_for_audio(model, audio, sample_rate, device, chunk_seconds=chunk_seconds,
@@ -360,6 +371,7 @@ def align_dataset(manifest, output, *, device="cpu", model_cache=".cache/mms_fa"
             artist_id = "artist:" + hashlib.sha256(artist_key.encode()).hexdigest()[:24]
             shared = {**source, "song_id": song_id, "artist_id": artist_id, "holdout_group": artist_id,
                       "source_audio_path": str(audio_path), "source_audio_sha256": digest,
+                      "source_audio_info": source.get("audio_info", {}),
                       "lyrics_source": "Human text from source manifest, unchanged",
                       "timestamp_source": "Automatic MMS_FA CTC forced alignment", "timestamps_human_verified": False,
                       "ctc_score_is_calibrated_accuracy": False, "ctc_backend": actual_backend,
@@ -383,6 +395,10 @@ def align_dataset(manifest, output, *, device="cpu", model_cache=".cache/mms_fa"
                 condition_hash = hashlib.sha256(json.dumps([source.get("caption", ""), segment_lyrics], ensure_ascii=False).encode()).hexdigest()
                 samples.append({**shared, **encoding, "id": identity, "audio_path": str(target), "sha256": crop_hash,
                                 "sampling_rate": sample_rate, "channels": audio.shape[1], "duration": crop_duration,
+                                "audio_info": {"duration_seconds": crop_duration, "sample_rate": sample_rate,
+                                               "channels": audio.shape[1], "frames": end_frame - start_frame,
+                                               "format": encoding["audio_format"], "subtype": encoding["audio_subtype"],
+                                               "size_bytes": target.stat().st_size, "sha256": crop_hash},
                                 "crop_start_frame": start_frame, "crop_end_frame": end_frame,
                                 "crop_start": start_frame / sample_rate, "crop_end": end_frame / sample_rate,
                                 "lyrics": segment_lyrics, "lines": [{**line, "segment_start": line["start"] - start_frame / sample_rate,
@@ -395,6 +411,8 @@ def align_dataset(manifest, output, *, device="cpu", model_cache=".cache/mms_fa"
                 progress({"event": "aligned_song", "song_id": song_id, "line_score_mean": sum(line["ctc_score"] for line in aligned) / len(aligned),
                           "candidate_groups": len(groups), "rejected_groups": len(rejected), "accepted_segments_total": len(samples)})
         except (ValueError, OSError, RuntimeError, KeyError) as error:
+            if cache_only:
+                raise ValueError(f"Cache-only rebuild aborted for {song_id}; existing manifests were not replaced: {error}") from error
             quarantined.append({"song_id": song_id, "reason": str(error), "entire_song": True})
             counts["songs_failed"] += 1
             if progress:
@@ -411,13 +429,14 @@ def align_dataset(manifest, output, *, device="cpu", model_cache=".cache/mms_fa"
               "parameters": parameters, "origin": origin, "counts": dict(counts),
               "accepted_seconds": sum(sample["duration"] for sample in samples),
               "accepted_genres": dict(Counter(str(sample.get("genre", "unknown")) for sample in samples)),
-              "device": str(device), "cuda_peak_allocated_bytes": torch.cuda.max_memory_allocated(device) if str(device).startswith("cuda") else 0}
+              "device": str(device), "cuda_peak_allocated_bytes": torch.cuda.max_memory_allocated(device) if model is not None and str(device).startswith("cuda") else 0}
     _write_json(destination / "dataset.json", {"version": 1, "samples": samples, "metadata": report})
     _write_json(destination / "full_tracks.json", {"version": 1, "samples": full_tracks, "metadata": report})
     _write_json(destination / "quarantine.json", {"version": 1, "entries": quarantined, "metadata": report})
     _write_json(destination / "alignment_report.json", report)
+    used_cuda = model is not None and str(device).startswith("cuda")
     del model
-    if str(device).startswith("cuda"):
+    if used_cuda:
         torch.cuda.empty_cache()
     return report
 
@@ -431,6 +450,7 @@ def main(argv=None) -> int:
     parser.add_argument("--max-songs", type=int)
     parser.add_argument("--song-id", action="append", default=[])
     parser.add_argument("--dtype", choices=("float16", "float32"), default="float16")
+    parser.add_argument("--cache-only", action="store_true", help="Rebuild crops/manifests using cached alignments of --dtype; never loads the model or runs inference")
     for name, default in (("chunk-seconds", 20), ("context-seconds", 2), ("min-seconds", 8), ("max-seconds", 30),
                           ("max-gap", 5), ("padding", .25), ("min-line-score", .35),
                           ("max-low-character-fraction", .25), ("max-word-seconds", 8), ("max-trellis-mb", 512)):

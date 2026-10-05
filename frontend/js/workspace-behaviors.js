@@ -26,17 +26,20 @@ const WorkspaceBehaviors = (() => {
     const gateStart = () => {
       const ezReasons = _reasons("ez-dataset-dir", $("ez-model-variant"));
       const fullReasons = _reasons("full-dataset-dir", $("full-model-variant"));
+      const display = reasons => reasons.map(reason => window.JKLegacyI18n?.translate(reason) || reason);
+      const ezDisplay = display(ezReasons), fullDisplay = display(fullReasons);
       const ezBtn = $("btn-start-ez"), fullBtn = $("btn-start-full");
-      if (ezBtn) { ezBtn.disabled = ezReasons.length > 0; ezBtn.title = ezReasons.join(". ") || ""; }
-      if (fullBtn) { fullBtn.disabled = fullReasons.length > 0; fullBtn.title = fullReasons.join(". ") || ""; }
+      if (ezBtn) { ezBtn.disabled = ezReasons.length > 0; ezBtn.title = ezDisplay.join(". ") || ""; }
+      if (fullBtn) { fullBtn.disabled = fullReasons.length > 0; fullBtn.title = fullDisplay.join(". ") || ""; }
       const ezHint = $("ez-start-hint");
-      if (ezHint) { ezHint.textContent = ezReasons.length ? ezReasons.join(" \u00b7 ") : ""; ezHint.style.display = ezReasons.length ? "" : "none"; }
+      if (ezHint) { ezHint.textContent = ezReasons.length ? ezDisplay.join(" \u00b7 ") : ""; ezHint.style.display = ezReasons.length ? "" : "none"; }
       const fullHint = $("full-start-hint");
-      if (fullHint) { fullHint.textContent = fullReasons.length ? fullReasons.join(" \u00b7 ") : ""; fullHint.style.display = fullReasons.length ? "" : "none"; }
+      if (fullHint) { fullHint.textContent = fullReasons.length ? fullDisplay.join(" \u00b7 ") : ""; fullHint.style.display = fullReasons.length ? "" : "none"; }
     };
     $("ez-dataset-dir")?.addEventListener("change", gateStart);
     $("full-dataset-dir")?.addEventListener("change", gateStart);
     document.addEventListener("appstate:status", gateStart);
+    document.addEventListener("jk-step:language", gateStart);
     gateStart();
   }
 
@@ -122,7 +125,7 @@ const WorkspaceBehaviors = (() => {
   /* ---- Open Output Dir Handler ---- */
   function initOpenOutputDir() {
     $("btn-open-output")?.addEventListener("click", async () => {
-      const dir = $("monitor-output-dir")?.textContent?.replace("Output: ", "").trim() || "";
+      const dir = jkSourceText($("monitor-output-dir")).replace("Output: ", "").trim() || "";
       if (!dir) { showToast("No output directory available", "warn"); return; }
       const result = await API.openFolder(dir);
       if (result.ok) showToast("Output directory opened", "ok");
@@ -399,7 +402,7 @@ const WorkspaceBehaviors = (() => {
       const dsDir = $("full-dataset-dir")?.value;
       if (!dsDir) { if ($("full-step-estimate")) $("full-step-estimate").style.display = "none"; return; }
       const infoEl = $("full-dataset-info");
-      const sampleMatch = infoEl?.textContent?.match(/(\d+)\s*samples/);
+      const sampleMatch = jkSourceText(infoEl).match(/(\d+)\s*samples/);
       const samples = sampleMatch ? parseInt(sampleMatch[1], 10) : 0;
       if (!samples) { if ($("full-step-estimate")) $("full-step-estimate").style.display = "none"; return; }
 
@@ -456,7 +459,7 @@ const WorkspaceBehaviors = (() => {
       setTimeout(() => {
         const ppStatus = $("full-pp-status");
         if (!ppStatus) return;
-        const hasPP = ppStatus.textContent.includes("detected");
+        const hasPP = jkSourceText(ppStatus).includes("detected");
         if (hasPP && lrInput && (lrInput.value === "1e-4" || lrInput.value === lrInput.dataset?.default)) {
           lrInput.value = "5e-5";
           lrInput.dispatchEvent(new Event("input"));

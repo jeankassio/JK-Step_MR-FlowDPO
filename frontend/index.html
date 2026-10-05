@@ -117,6 +117,11 @@
       <a class="topbar__mode" href="/quality" onclick="this.href='/quality?token='+encodeURIComponent(window.__SIDESTEP_TOKEN__ || new URLSearchParams(location.search).get('token') || '')">MR-FlowDPO ↗</a>
     </nav>
     <span class="topbar__spacer"></span>
+    <label class="legacy-language-label"><span>Language</span>
+      <select id="legacy-language" class="legacy-language-picker" aria-label="Interface language">
+        <option data-no-i18n value="en">English</option><option data-no-i18n value="pt">Português</option><option data-no-i18n value="es">Español</option>
+      </select>
+    </label>
     <span class="topbar__status-chip topbar__status-chip--idle" id="topbar-status-chip">Idle</span>
     <span class="topbar__divider"></span>
     <div class="topbar__gpu" id="topbar-gpu" data-gpu-count="1">
@@ -1458,7 +1463,7 @@
               <div class="review-table__group" data-jump="full-save-every" style="cursor:pointer;">Saving</div>
               <div class="review-table__row"><span class="review-table__key">Save every</span><span class="review-table__val" id="rev-save-every">10 epochs</span></div>
               <div class="review-table__row"><span class="review-table__key">Save best</span><span class="review-table__val" id="rev-save-best">yes</span></div>
-              <div class="review-table__row"><span class="review-table__key">Resume from</span><span class="review-table__val" id="rev-resume">--</span></div>
+              <div class="review-table__row"><span class="review-table__key">Resume from</span><span class="review-table__val" id="rev-resume" data-no-i18n>--</span></div>
             </div>
             <div style="margin-top: var(--space-lg); display: flex; flex-direction: column; align-items: center; gap: var(--space-xs);">
               <div style="display:flex; gap:var(--space-sm);">
@@ -1473,7 +1478,7 @@
           <!-- CLI Export Panel (hidden until clicked) -->
           <div class="panel" id="cli-export-panel" style="display: none;">
             <div class="panel__title">Reproducible CLI Command</div>
-            <pre class="log-viewer" id="cli-export-content" style="max-height: 200px; font-size: 11px; user-select: all;"></pre>
+            <pre class="log-viewer" id="cli-export-content" data-no-i18n style="max-height: 200px; font-size: 11px; user-select: all;"></pre>
             <button class="btn btn--sm" id="btn-copy-cli" style="margin-top: var(--space-sm);">Copy to Clipboard</button>
           </div>
 
@@ -1544,7 +1549,7 @@
 
         <!-- Run header -->
         <div style="margin-bottom: var(--space-lg);">
-          <div style="font-size: var(--font-size-xl); font-weight: bold; color: var(--text-bold);" id="monitor-run-name">
+          <div style="font-size: var(--font-size-xl); font-weight: bold; color: var(--text-bold);" id="monitor-run-name" data-no-i18n>
             --
           </div>
           <div style="font-size: var(--font-size-sm); color: var(--muted); margin-top: var(--space-xs);" id="monitor-output-dir">
@@ -1701,7 +1706,7 @@
             <!-- Log viewer -->
             <div class="panel">
               <div class="panel__title">Training Log</div>
-              <div class="log-viewer" id="monitor-log">
+              <div class="log-viewer" id="monitor-log" data-no-i18n>
                 <div class="log-entry log-entry--info">  [info]  Waiting for training to start...</div>
               </div>
             </div>
@@ -1842,11 +1847,11 @@
                 <div class="compare-legend">
                   <div class="compare-legend__item">
                     <span class="compare-legend__swatch" style="background:var(--primary);"></span>
-                    <span class="compare-legend__name u-text-primary" id="compare-legend-a" title="Run A">Run A</span>
+                    <span class="compare-legend__name u-text-primary" id="compare-legend-a" data-no-i18n title="Run A">Run A</span>
                   </div>
                   <div class="compare-legend__item">
                     <span class="compare-legend__swatch" style="background:var(--warning);"></span>
-                    <span class="compare-legend__name u-text-warning" id="compare-legend-b" title="Run B">Run B</span>
+                    <span class="compare-legend__name u-text-warning" id="compare-legend-b" data-no-i18n title="Run B">Run B</span>
                   </div>
                 </div>
               </div>
@@ -1986,7 +1991,7 @@
             <div class="ap-display">
               <div class="ap-display-row ap-display-row--top">
                 <div class="ap-marquee-wrap" id="ap-marquee-wrap">
-                  <span class="ap-marquee" id="ap-track-name">-- standby --</span>
+                  <span class="ap-marquee" id="ap-track-name" data-no-i18n>-- standby --</span>
                 </div>
                 <div class="ap-eq" id="ap-eq">
                   <div class="ap-eq-col" id="ap-eq-0"><div class="ap-eq-fill"></div><div class="ap-eq-seg"></div></div>
@@ -2595,7 +2600,7 @@
     <div class="sidecar-editor__body">
       <div class="form-group">
         <label class="form-group__label">File</label>
-        <div style="color: var(--text-bold); font-size: var(--font-size-sm);" id="sidecar-filename">--</div>
+        <div style="color: var(--text-bold); font-size: var(--font-size-sm);" id="sidecar-filename" data-no-i18n>--</div>
       </div>
       <div class="form-group">
         <label class="form-group__label">Caption</label>
@@ -2874,7 +2879,7 @@
       </div>
       <div class="modal__body" style="padding-bottom:0;">
         <!-- Breadcrumb trail -->
-        <div class="fb-breadcrumb" id="file-browser-breadcrumb"></div>
+        <div class="fb-breadcrumb" id="file-browser-breadcrumb" data-no-i18n></div>
         <!-- Path input bar -->
         <div style="display:flex;gap:var(--space-sm);margin-bottom:var(--space-sm);">
           <input class="input" type="text" id="file-browser-path" value="/" placeholder="Type a path and press Enter" style="flex:1;font-size:var(--font-size-sm);">
@@ -2907,7 +2912,7 @@
       <div class="modal__body">
         <div style="margin-bottom: var(--space-md);">
           <div style="font-size: var(--font-size-sm); color: var(--muted);">Run:</div>
-          <div style="font-weight: bold; color: var(--text-bold);" id="resume-run-name">--</div>
+          <div style="font-weight: bold; color: var(--text-bold);" id="resume-run-name" data-no-i18n>--</div>
         </div>
 
         <!-- Checkpoint picker -->
@@ -3109,6 +3114,10 @@
 
 </div>
 
+<script src="js/legacy-i18n-messages.js"></script>
+<script src="js/legacy-i18n-dynamic.js"></script>
+<script src="js/legacy-i18n-tutorial.js"></script>
+<script src="js/legacy-i18n.js"></script>
 <script src="js/fallback.js"></script>
 <script src="js/app-state.js"></script>
 <script src="js/utils.js"></script>

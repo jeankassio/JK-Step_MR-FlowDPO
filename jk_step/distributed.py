@@ -550,8 +550,11 @@ def launch_training(config: dict, progress=None, stop_event=None, stop_file: str
         return run_training(config,progress=progress,stop_event=stop_event)
     from .config import validate_config
     config = validate_config(config,check_paths=False)
-    if not Path(config["pairs_manifest"]).is_file():
-        raise FileNotFoundError(f"Preference manifest not found: {config['pairs_manifest']}")
+    data_key = "dataset_manifest" if config.get("objective") == "sft" else "pairs_manifest"
+    data_path = Path(config[data_key])
+    valid_data = data_path.exists() if data_key == "dataset_manifest" else data_path.is_file()
+    if not valid_data:
+        raise FileNotFoundError(f"Training dataset not found: {data_path}")
     gpu_ids = config.get("gpu_ids",["0","1"])
     if isinstance(gpu_ids,str):
         gpu_ids = [part.strip() for part in gpu_ids.split(",") if part.strip()]

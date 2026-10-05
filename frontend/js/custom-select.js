@@ -32,6 +32,7 @@ const CustomSelect = (() => {
         item.className = "cs-option" + (i === sel.selectedIndex ? " cs-selected" : "");
         if (opt.disabled) item.classList.add("cs-disabled");
         item.textContent = opt.textContent;
+        if (opt.hasAttribute('data-no-i18n')) item.setAttribute('data-no-i18n', '');
         item.dataset.value = opt.value;
         item.dataset.idx = i;
         item.addEventListener("click", (e) => {
@@ -66,6 +67,8 @@ const CustomSelect = (() => {
     const label = wrapper.querySelector(".cs-label");
     if (!label) return;
     const opt = sel.options[sel.selectedIndex];
+    if (opt?.hasAttribute('data-no-i18n')) label.setAttribute('data-no-i18n', '');
+    else label.removeAttribute('data-no-i18n');
     label.textContent = opt ? opt.textContent : "";
   }
 
@@ -82,6 +85,7 @@ const CustomSelect = (() => {
     const label = document.createElement("span");
     label.className = "cs-label";
     const opt = sel.options[sel.selectedIndex];
+    if (opt?.hasAttribute('data-no-i18n')) label.setAttribute('data-no-i18n', '');
     label.textContent = opt ? opt.textContent : "";
 
     const arrow = document.createElement("span");

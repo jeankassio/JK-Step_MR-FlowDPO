@@ -1,17 +1,20 @@
 # JK-Step MR-FlowDPO
 
-[English](README.md) · **Português (Brasil)**
+[English](README.md) · **Português (Brasil)** · [Español](README_ES.md)
 
-Treinador de LoRA por preferências para **ACE-Step 1.5 SFT e SFT XL**, com linha de comando, interface local no navegador e ferramentas de dataset derivadas do [Side-Step](https://github.com/koda-dernet/Side-Step).
+Treinador de LoRA supervisionado e por preferências para **ACE-Step 1.5 SFT e SFT XL**, com linha de comando, interface local no navegador e ferramentas de dataset derivadas do [Side-Step](https://github.com/koda-dernet/Side-Step). O fluxo padrão da interface começa com **uma pasta de músicas** e prepara automaticamente descrições, letras, trechos, JSON e tensores de treinamento.
 
 O objetivo é investigar qualidade musical e acústica geral preservando a fidelidade da letra. Você pode criar datasets a partir de gravações existentes; **não é necessário gerar músicas com Turbo**. O adapter modifica o próprio modelo de geração, sem aplicar masterização, equalização ou outra pós-produção às músicas geradas.
 
 ![Interface de JK-Step MR-FlowDPO no navegador](assets/Screenshots/JK-Step_MR-FlowDPO.png)
 
-**Estado da pesquisa:** esta é uma adaptação experimental do [MR-FlowDPO](https://arxiv.org/abs/2512.10264) para ACE-Step. O artigo avaliou geração instrumental com outros modelos de flow matching. Os testes verificam que o treinador executa, atualiza o LoRA e congela o base; eles não comprovam melhoria musical nem garantem preservação da pronúncia. Veja os [resultados de validação](docs/VALIDATION.md).
+**Estado da pesquisa:** o modo por preferências é uma adaptação experimental do [MR-FlowDPO](https://arxiv.org/abs/2512.10264) para ACE-Step. O artigo avaliou geração instrumental com outros modelos de flow matching. O modo SFT usa flow matching supervisionado normal, sem comparações de preferência. Os testes verificam que o treinador executa, atualiza o LoRA e congela o base; eles não comprovam melhoria musical nem garantem preservação da pronúncia. Veja os [resultados de validação](docs/VALIDATION.md).
 
 ## Recursos incluídos
 
+- Preparação de pasta até LoRA: descrições locais Qwen2.5-Omni-7B, letras/timestamps Whisper large-v3, trechos, JSON e tensores. Escolha preferências MR-FlowDPO automáticas ou SFT normal. A UI não exige músicas Turbo, Genius/chave de API ou JSON escrito manualmente.
+- Pares MR-FlowDPO automáticos comparam cada trecho existente com cópias degradadas por lowpass, ruído ou clipping. Essas comparações sintéticas ensinam a evitar defeitos específicos; não estabelecem preferências gerais de qualidade musical nem reproduzem os rewards MRSD do artigo.
+- SFT com um único alvo e loss de flow matching mascarada em FP32, validação por grupos antes das repetições e suporte a uma ou várias GPUs no mesmo motor de checkpoint, retomada e exportação.
 - Objetivo Flow-DPO real, com o SFT original congelado como referência, sem manter uma segunda cópia do XL em cada GPU.
 - Rank, alpha, dropout, rsLoRA, ajustes por módulo, camadas do decoder, self/cross attention e alvos MLP configuráveis.
 - Seleção de pares por múltiplas recompensas, importação humana, degradações controladas, pré-processamento compartilhado e caches de tensores.
@@ -39,12 +42,12 @@ O ambiente verificado usa Python 3.12, PyTorch 2.10, CUDA 12.8 e TorchCodec 0.10
 
 | Opção do instalador | Efeito |
 | --- | --- |
-| `install_windows.bat -CoreOnly` | Instala treinador/UI essenciais, sem integrações extras de captions, separação de stems e interface no terminal. |
+| `install_windows.bat -CoreOnly` | Instala treinador/UI e o fluxo local de descrições/transcrição da pasta, sem integrações opcionais de APIs remotas, separação de stems e interface no terminal. |
 | `install_windows.bat -Rewards` | Instala também os avaliadores opcionais CLAP e Audiobox. |
 | `install_windows.bat -SkipModels` | Pula os modelos; use arquivos locais ou execute `models setup` depois. |
 | `install_windows.bat -Backend cpu` | Instala PyTorch CPU para desenvolvimento ou testes pequenos. Treinar XL na CPU é lento. |
 
-SoundFile atende o fluxo básico com WAV/FLAC. Formatos que precisam de TorchCodec também exigem bibliotecas compartilhadas FFmpeg compatíveis; veja as [instruções oficiais de compatibilidade](https://github.com/meta-pytorch/torchcodec#compatibility-with-torch-versions).
+A preparação de pasta decodifica com SoundFile e usa o executável `imageio-ffmpeg` fornecido quando necessário; esse fluxo padrão não exige configurar FFmpeg externo. Funções opcionais do toolkit herdado que usam TorchCodec ainda podem exigir bibliotecas compartilhadas FFmpeg compatíveis; veja as [instruções oficiais do TorchCodec](https://github.com/meta-pytorch/torchcodec#compatibility-with-torch-versions).
 
 ### Linux
 
@@ -60,7 +63,7 @@ bash jk-step.sh gui
 
 ### Armazenamento e memória da GPU
 
-Reserve aproximadamente **22 GB para os modelos padrão**, além do ambiente, áudios, tensores em cache e adapters. O SFT XL sozinho ocupa cerca de 20 GB. O nome de arquivo padrão Hugging Face é criado por hardlink quando possível; outros sistemas de arquivos podem precisar de uma cópia adicional de aproximadamente 20 GB para compatibilidade com o toolkit.
+Reserve aproximadamente **22 GB para os modelos ACE de geração/pré-processamento**, além do ambiente, áudios, cache, adapters e downloads adicionais de Qwen para descrições e Whisper para transcrição no fluxo de pasta. O SFT XL sozinho ocupa cerca de 20 GB. O nome de arquivo padrão Hugging Face é criado por hardlink quando possível; outros sistemas de arquivos podem precisar de uma cópia adicional de aproximadamente 20 GB para compatibilidade com o toolkit.
 
 Uma RTX 3090 de 24 GB foi usada nos testes de execução. A VRAM real depende do crop, batch, rank, camadas e precisão. Comece com batch 1, precisão mista, offload e gradient checkpointing. O padrão usa GPU 0; você pode selecionar outro dispositivo compatível, como `--device cuda:1` ou `--device cpu`.
 
@@ -76,8 +79,10 @@ Uma RTX 3090 de 24 GB foi usada nos testes de execução. A VRAM real depende do
 | Pesos SFT XL puro | [jeankassio/acestep_v1.5_sft_xl](https://huggingface.co/jeankassio/acestep_v1.5_sft_xl), na revisão fixada e registrada pelo aplicativo. |
 | Arquitetura, configuração e silêncio correspondentes | [ACE-Step/acestep-v15-xl-sft](https://huggingface.co/ACE-Step/acestep-v15-xl-sft), com revisão fixada separadamente. |
 | VAE e Qwen3-Embedding-0.6B | [ACE-Step/Ace-Step1.5](https://huggingface.co/ACE-Step/Ace-Step1.5), com a revisão resolvida registrada localmente. |
+| Descrições locais da pasta | [Qwen/Qwen2.5-Omni-7B](https://huggingface.co/Qwen/Qwen2.5-Omni-7B), baixado quando necessário para anotar os áudios. |
+| Letras/timestamps locais | [openai/whisper-large-v3](https://huggingface.co/openai/whisper-large-v3), baixado quando necessário para transcrição. |
 
-Os downloads podem ser retomados e arquivos completos são reutilizados. Este fluxo não exige checkpoint Turbo/Merge nem LM gerador de música. Modelos dos avaliadores/toolkit são downloads adicionais.
+Os downloads podem ser retomados e arquivos completos são reutilizados. A preparação de pasta baixa automaticamente modelos de anotação e ACE ausentes quando os downloads estão habilitados. Esse fluxo não precisa de checkpoint Turbo/Merge, LM gerador de músicas, token Genius ou API remota de descrições/transcrição. Modelos de avaliação/toolkit são downloads extras.
 
 Para usar um safetensors existente, configure `checkpoint_file` e seu `model_config_dir` correspondente. Os nomes e formatos dos parâmetros são conferidos antes da alocação. `--no-auto-download` desativa o download automático padrão. Diretórios Hugging Face podem usar `checkpoint_dir` e `model_variant` (`xl-sft`, `sft`, `xl-base` ou `base`). Este motor não habilita treino por preferências do Turbo destilado.
 
@@ -89,7 +94,9 @@ Para usar um safetensors existente, configure `checkpoint_file` e seu `model_con
 .\jk-step.bat gui --port 8772 --no-browser
 ```
 
-A página MR-FlowDPO reúne modelos, criação/avaliação de pares, pré-processamento, configuração, logs e cancelamento. Seu link para o toolkit abre organização de áudios, sidecars, captions/letras, análise, stems, PP++ e o fluxo supervisionado/adapters herdado.
+Use o seletor de idioma da interface para escolher **English**, **Português** ou **Español**. O navegador salva essa preferência. Ela muda os textos da interface, independentemente do idioma das letras/transcrição (`auto`, `pt`, `en`, `es` etc.); uma interface em inglês pode preparar músicas em português.
+
+A página principal abre na preparação de pasta com MR-FlowDPO selecionado. SFT normal é outra opção da pasta. Dataset, Preparar e Treinar reúnem seleção, preparação automática, revisão, configuração, logs e cancelamento. Importar pares humanos e selecionar candidatos avaliados continuam disponíveis separadamente. O toolkit abre organização de áudios, sidecars, captions/letras, análise, stems, PP++ e ferramentas herdadas de adapters.
 
 ```powershell
 .\jk-step.bat toolkit --help
@@ -99,6 +106,36 @@ A página MR-FlowDPO reúne modelos, criação/avaliação de pares, pré-proces
 ```
 
 `sidestep` permanece como alias de compatibilidade de `toolkit`. [UPSTREAM.md](UPSTREAM.md) preserva a documentação histórica e os créditos; [docs/toolkit](docs/toolkit) contém os guias herdados. O pacote Python atual é `jk_engine`; sua entrada opcional de interface no terminal é `jk_step_tui.py`.
+
+## Início rápido: pasta de músicas até LoRA
+
+1. Abra `start_ui.bat`. Em **Dataset**, escolha a pasta e o objetivo: **MR-FlowDPO** automático ou **SFT** normal.
+2. Clique em **Preparar dataset**. O aplicativo baixa modelos ausentes, anota os áudios localmente, prepara trechos com a letra correspondente e grava dataset/tensores fora dos originais.
+3. Em **Preparar**, revise captions/letras das amostras e itens excluídos. Transcrições de canto e timestamps automáticos podem conter erros.
+4. Continue em **Treinar**. O manifesto correto e o preset são preenchidos automaticamente; escolha uma saída nova, ajuste as opções e inicie o LoRA.
+
+MR-FlowDPO usa `conservative`: rank 32, alpha 64, LR `1e-6`, beta 100, regularização FM do escolhido 0.1, batch 1, acumulação 8 e duas épocas. A pasta mantém os trechos preparados completos (`max_latent_length=0`, dropout CFG 0). As comparações mistas padrão incluem lowpass, ruído e clipping; são defeitos artificiais conhecidos, não avaliações humanas da composição.
+
+SFT normal usa `sft_lora`: rank 32, alpha 64, LR `1e-5`, batch 1, acumulação 4, 100 épocas, warmup 50, dropout CFG 0.1 e `max_latent_length=0`. São valores iniciais editáveis, não ótimos comprovados. `sft_rank64` oferece rank 64/alpha 128. A opção de conteúdo permite voz, instrumentais ou detecção automática.
+
+O mesmo fluxo está disponível no ambiente ativado do projeto:
+
+```powershell
+python -m jk_step dataset inspect --audio-dir "E:/Minhas músicas"
+
+# MR-FlowDPO automático; use pairs_manifest retornado no resultado final.
+python -m jk_step dataset prepare --audio-dir "E:/Minhas músicas" --output datasets/minhas_musicas_mr --objective flow_dpo
+python -m jk_step train --preset conservative --pairs-manifest "<pairs_manifest retornado>" --max-latent-length 0 --output-dir output/meu_lora_mr
+
+# Alternativamente, SFT normal com alvo único.
+python -m jk_step dataset prepare --audio-dir "E:/Minhas músicas" --output datasets/minhas_musicas --objective sft
+python -m jk_step config --preset sft_lora --output configs/meu_sft.json
+python -m jk_step train --config configs/meu_sft.json --dataset-manifest datasets/minhas_musicas/supervised_manifest.json --output-dir output/meu_lora_sft
+```
+
+Use os caminhos reais retornados: **`pairs_manifest` para MR-FlowDPO**, **`dataset_manifest` para SFT**. Ambos gravam anotações em `dataset.json`; somente SFT grava `supervised_manifest.json`, sem scores ou áudio rejeitado. MR automático cria cópias com degradações controladas e tensores pareados, sem exigir JSON manual de pares. O guia em [Português](docs/FOLDER_TO_LORA_PTBR.md), [English](docs/FOLDER_TO_LORA.md) ou [Español](docs/FOLDER_TO_LORA_ES.md) explica opções, letras revisadas, limites, várias GPUs, retomada e ComfyUI.
+
+Um teste funcional limitado concluiu a preparação de pasta com modelos locais de anotação, JSON/tensores, treino SFT iniciado pela UI e exportação do adapter. Outro teste MR automático preparou três pares controlados de áudio em português, codificou ambos os lados, executou uma atualização Flow-DPO real e exportou pesos finitos. Duas RTX 3090 foram usadas em outro teste de execução SFT. Esses testes verificam funcionamento e arquivos salvos; não medem melhoria audível, precisão da letra ou desempenho em datasets arbitrários.
 
 ## Preparar datasets de preferências
 
@@ -176,6 +213,8 @@ Para o conjunto inicial em português (24 músicas existentes, cerca de 146 MB d
 
 No Linux, use `.venv/bin/python`. Os importadores preservam letras, hashes e licenças; os trechos alinhados são gravados em FLAC ou WAV FLOAT32, sem mudar ganho nem sample rate. A letra de uma música inteira não deve acompanhar um recorte curto arbitrário. Esses arquivos são amostras de origem, não preferências MRSD naturalmente ranqueadas. Consulte o [guia dos datasets em português](docs/PORTUGUESE_DATASETS.md) sobre o piloto e suas limitações.
 
+O [guia de preparação do dataset de qualidade PT/EN](docs/QUALITY_DATASET_PREPARATION_PTBR.md) cobre alinhamento forçado experimental em português, seções inteiras do Muse, combinação de amostras únicas e balanceamento das referências PT após pré-processar cada par uma vez.
+
 ## Validar, pré-processar e treinar
 
 Execute na pasta do projeto, usando os manifests retornados pela criação dos pares:
@@ -205,12 +244,12 @@ As opções CLI prevalecem sobre o JSON carregado. `--set KEY=VALUE` aceita valo
 | Área | Controles configuráveis |
 | --- | --- |
 | Adapter | Rank/alpha/dropout, rsLoRA, rank/alpha por módulo, projeções, camadas, self/cross attention e MLP. |
-| Objetivo | Beta, regularizações FM do escolhido/velocidade da referência, label smoothing, peso dos pares, timesteps contínuos logit-normal/uniformes e dropout CFG compartilhado. |
+| Objetivo | `sft`: flow matching com um alvo. `flow_dpo`: beta, regularizações FM do escolhido/velocidade da referência, label smoothing e peso dos pares. Timesteps contínuos e dropout CFG se aplicam aos dois. |
 | Otimização | Batch/acumulação, epochs ou passos máximos, AdamW/AdamW8bit/Adafactor, LR, weight decay/momentos, warmup, scheduler constante/linear/cosseno e clipping. |
 | Hardware/dados | Dispositivo, precisão, offload, gradient checkpointing, workers, seeds, crops, repetições, conferência do cache e validação por grupo. |
 | Saídas | Frequência de avaliação/logs, TensorBoard, frequência/retenção de checkpoints, retomada, inicialização por adapter e exportação ComfyUI. |
 
-Batch conta **pares**, cada um com duas branches de áudio. A referência congelada adiciona uma passagem. Acumular aumenta o batch efetivo sem manter todas as ativações GPU. Pacotes opcionais de optimizer devem estar instalados; o toolkit supervisionado oferece outras opções de optimizer/adapters além deste motor de preferências.
+No Flow-DPO, batch conta **pares**, cada um com duas branches de áudio, e a referência congelada adiciona uma passagem. No SFT, conta **exemplos de áudio individuais**, sem passagem de referência. Acumular aumenta o batch efetivo sem manter todas as ativações GPU. Pacotes opcionais de optimizer devem estar instalados; o toolkit herdado também oferece outras opções de optimizer/adapters.
 
 ### Treinamento multi-GPU experimental
 
@@ -242,7 +281,9 @@ Com `export_comfyui=true`, a conclusão também salva `quality_comfyui.safetenso
 
 ## Método e limites de avaliação
 
-O objetivo principal para cada par escolhido/rejeitado é:
+Com `objective=sft`, o treinador aprende a velocidade de flow da gravação individual (`noise - target_latents`) a partir de uma interpolação ruidosa, com erro quadrático mascarado em FP32. Somente os pesos LoRA do decoder treinam. Trechos vocais preparados não podem ser encurtados aleatoriamente mantendo a letra completa. `beta`, regularizações de preferência, smoothing e pesos de pares não têm efeito no SFT.
+
+Com `objective=flow_dpo`, o objetivo principal para cada par escolhido/rejeitado é:
 
 ```text
 softplus(beta * ((erro_escolhido - erro_rejeitado)
@@ -258,7 +299,7 @@ Loss menor ou margem melhor não comprovam música audivelmente melhor. Avalie m
 ## Desenvolvimento e distribuição
 
 ```text
-jk_step/          Motor de preferências, CLI, UI, modelos e pares
+jk_step/          Motor SFT/preferências, fluxo de pasta, CLI, UI e modelos
 jk_engine/        Toolkit de dataset/supervisão adaptado do Side-Step
 frontend/         Arquivos da interface no navegador
 configs/          Presets e exemplos de pares

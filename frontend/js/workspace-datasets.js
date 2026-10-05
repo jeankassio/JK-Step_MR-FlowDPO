@@ -21,6 +21,7 @@ const WorkspaceDatasets = (() => {
     if (!opt) {
       opt = document.createElement("option");
       opt.value = path;
+      opt.setAttribute("data-no-i18n", "");
       opt.textContent = _baseName(path) + " (manual)";
       sel.appendChild(opt);
     }
@@ -56,9 +57,9 @@ const WorkspaceDatasets = (() => {
           ? ` <button class="btn btn--sm" data-action="open-source-audio" data-path="${_esc(ds.audio_linked)}" title="Open linked source audio folder">Source Audio</button>`
           : "";
         tr.innerHTML = `
-          <td class="u-text-bold">${_esc(ds.name)}${metaLine}</td>
-          <td>${_esc(ds.files_label)}</td><td>${_esc(ds.duration_label)}</td><td>${linked}</td>
-          <td class="u-meta-muted-xs">${_esc(ds.path)}</td>
+          <td class="u-text-bold"><span data-no-i18n>${_esc(ds.name)}</span>${metaLine}</td>
+          <td>${_esc(ds.files_label)}</td><td>${_esc(ds.duration_label)}</td><td data-no-i18n>${linked}</td>
+          <td data-no-i18n class="u-meta-muted-xs">${_esc(ds.path)}</td>
           <td>
             <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">
               <button class="btn btn--sm" data-action="open-dataset" data-path="${_esc(ds.path)}">Open</button>

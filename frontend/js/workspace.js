@@ -415,7 +415,7 @@ document.addEventListener("keydown", (e) => {
     const sel = $("ez-dataset-dir") || $("full-dataset-dir");
     const opt = sel?.selectedOptions?.[0];
     if (!opt) return 0;
-    const m = opt.textContent.match(/(\d+)\s*files/);
+    const m = jkSourceText(opt).match(/(\d+)\s*files/);
     const count = m ? parseInt(m[1]) : 0;
     const bs = parseInt(batchSize) || 1, ga = parseInt(gradAccum) || 1;
     return count > 0 ? Math.ceil(count / (bs * ga)) : 0;

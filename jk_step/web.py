@@ -19,6 +19,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.routing import APIRoute
 from fastapi.responses import FileResponse, HTMLResponse
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -99,6 +100,29 @@ class JobManager:
                     return dict(job)
         return None
 
+    def _toolkit_busy(self) -> bool:
+        """A cancelled/done UI label must not release live GPU workers."""
+        if not self.task_manager:
+            return False
+        if self.task_manager.active_operation():
+            return True
+        lock = getattr(self.task_manager, "_lock", None)
+        if lock is None:
+            return False
+        with lock:
+            tasks = list(getattr(self.task_manager, "_tasks", {}).values())
+            training = getattr(self.task_manager, "_training_task", None)
+            if training is not None:
+                tasks.append(training)
+            for task in tasks:
+                thread = getattr(task, "thread", None)
+                process = getattr(task, "process", None)
+                if thread is not None and thread.is_alive():
+                    return True
+                if process is not None and process.poll() is None:
+                    return True
+        return False
+
     def _persist(self, job: dict) -> None:
         _write_json(self.store / job["id"] / "job.json", job)
 
@@ -139,13 +163,20 @@ class JobManager:
             return {"job": dict(self._jobs[job_id]), "events": [event for event in events if event["sequence"] > after], "cursor": events[-1]["sequence"] if events else after}
 
     def start(self, kind: str, config: dict) -> dict:
-        if kind not in {"pairs", "score", "preprocess", "train", "model_setup"}:
+        if kind not in {"pairs", "score", "preprocess", "train", "model_setup", "prepare_dataset"}:
             raise HTTPException(400, "Operação desconhecida")
         with self._lock:
             if self.active():
                 raise HTTPException(409, "Já existe uma execução MR-FlowDPO ativa")
-            if self.task_manager and self.task_manager.active_operation():
+            if self._toolkit_busy():
                 raise HTTPException(409, "Outra operação está ativa na interface SFT/datasets")
+            if kind == "prepare_dataset":
+                folder = Path(_required(config, "audio_dir")).expanduser()
+                if not folder.is_absolute():
+                    folder = self.root / folder
+                if not folder.is_dir():
+                    raise HTTPException(422, "Pasta de músicas não encontrada")
+                config = {**config, "audio_dir": str(folder.resolve())}
             if kind == "train":
                 try:
                     config = _config_module().validate_config(config)
@@ -160,10 +191,13 @@ class JobManager:
             _write_json(config_path, config)
             python = self.root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
             executable = str(python) if python.is_file() else sys.executable
-            command = [executable, "-u", str(self.root / "jk_step.py")]
+            # The module entry point also exists in wheel installations.
+            command = [executable, "-u", "-m", "jk_step"]
             options = json.dumps(config.get("options", {}), ensure_ascii=False)
             if kind == "train":
                 command += ["train", "--config", str(config_path), "--stop-file", str(stop_path)]
+            elif kind == "prepare_dataset":
+                command += ["dataset", "prepare", "--config", str(config_path), "--stop-file", str(stop_path)]
             elif kind == "model_setup":
                 command += ["models", "setup", "--checkpoint-dir", _required(config, "checkpoint_dir")]
                 if config.get("weights_only", False):
@@ -210,6 +244,13 @@ class JobManager:
                 job["exit_code"] = exit_code
                 job["finished_at"] = time.time()
                 job["status"] = "cancelled" if job["status"] == "stopping" else ("completed" if exit_code == 0 else "failed")
+                if job["kind"] == "prepare_dataset" and job["status"] == "completed":
+                    result = job.get("result") or {}
+                    if result.get("cancelled"):
+                        job["status"] = "cancelled"
+                    elif not result.get("ready") and job["config"].get("preprocess", True):
+                        job["status"] = "failed"
+                        job["error"] = "A preparação terminou sem um dataset de treinamento válido. Consulte as exclusões e o log."
                 if exit_code and not job.get("error") and job["status"] == "failed":
                     job["error"] = f"O processo terminou com código {exit_code}. Consulte o log."
                 self._persist(job)
@@ -269,8 +310,25 @@ def _dataset_module():
 
 
 def create_router(task_manager=None, token: str = "") -> tuple[APIRouter, JobManager]:
-    router = APIRouter()
+    class LocalizedRoute(APIRoute):
+        def get_route_handler(self):
+            original = super().get_route_handler()
+            async def localized(request: Request):
+                try:
+                    return await original(request)
+                except HTTPException as exception:
+                    from .ui_messages import localize_error
+                    raise HTTPException(exception.status_code,
+                        localize_error(exception.detail, request.headers.get('Accept-Language', '')),
+                        headers=exception.headers) from exception
+            return localized
+    router = APIRouter(route_class=LocalizedRoute)
     manager = JobManager(task_manager)
+    def display_job(job, request):
+        if job is None:
+            return None
+        from .ui_messages import localize_error
+        return {**job, 'error': localize_error(job.get('error'), request.headers.get('Accept-Language', ''))}
 
     @router.get("/quality", response_class=HTMLResponse)
     async def quality():
@@ -311,8 +369,9 @@ def create_router(task_manager=None, token: str = "") -> tuple[APIRouter, JobMan
         return value
 
     @router.get("/api/mrflow/jobs")
-    async def jobs():
-        return {"jobs": manager.list(), "active": manager.active()}
+    async def jobs(request: Request):
+        return {"jobs": [display_job(job, request) for job in manager.list()],
+                "active": display_job(manager.active(), request)}
 
     @router.post("/api/mrflow/jobs")
     async def start_job(body: dict):
@@ -322,8 +381,9 @@ def create_router(task_manager=None, token: str = "") -> tuple[APIRouter, JobMan
         return manager.start(_required(body, "kind"), config)
 
     @router.get("/api/mrflow/jobs/{job_id}")
-    async def get_job(job_id: str, after: int = 0):
-        return manager.get(job_id, max(0, after))
+    async def get_job(job_id: str, request: Request, after: int = 0):
+        result = manager.get(job_id, max(0, after))
+        return {**result, 'job': display_job(result['job'], request)}
 
     @router.post("/api/mrflow/jobs/{job_id}/stop")
     async def stop_job(job_id: str):
@@ -402,6 +462,78 @@ def create_router(task_manager=None, token: str = "") -> tuple[APIRouter, JobMan
         except (OSError, ValueError, TypeError) as exc:
             raise HTTPException(422, str(exc)) from exc
 
+    @router.post("/api/mrflow/datasets/inspect")
+    async def inspect_dataset(body: dict):
+        try:
+            module = importlib.import_module("jk_step.dataset_pipeline")
+            return _jsonable(await asyncio.to_thread(module.inspect_folder, _required(body, "audio_dir")))
+        except (OSError, ValueError, TypeError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @router.post("/api/mrflow/datasets/preview")
+    async def preview_dataset(body: dict):
+        path = Path(_required(body, "manifest")).expanduser()
+        if not path.is_absolute():
+            path = _ROOT / path
+        if not path.is_file():
+            raise HTTPException(404, "Dataset não encontrado")
+        try:
+            maximum = min(20, max(1, int(body.get("limit", 5))))
+            payload, base = _dataset_module().read_manifest(path)
+            rows = payload.get("samples", [])
+            if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+                raise ValueError("Dataset precisa conter uma lista de amostras")
+            preview = []
+            for original in rows[:maximum]:
+                row = dict(original)
+                if row.get("audio_path"):
+                    audio = Path(row["audio_path"]).expanduser()
+                    row["audio_path"] = str((audio if audio.is_absolute() else base / audio).resolve())
+                preview.append(row)
+            return {"path": str(path.resolve()), "count": len(rows), "samples": preview,
+                    "metadata": payload.get("metadata", {})}
+        except (OSError, ValueError, TypeError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @router.post("/api/mrflow/datasets/report")
+    async def dataset_report(body: dict):
+        path = Path(_required(body, "report")).expanduser()
+        if not path.is_absolute():
+            path = _ROOT / path
+        try:
+            if path.suffix.lower() != ".json" or path.stat().st_size > 20 * 1024 * 1024:
+                raise ValueError("Use um relatório de preparação JSON de até 20 MB")
+            report = json.loads(path.read_text("utf-8-sig"))
+            if not isinstance(report, dict) or not isinstance(report.get("quarantine"), list):
+                raise ValueError("Esse arquivo não é um relatório de preparação")
+            excluded = report["quarantine"]
+            if any(not isinstance(item, dict) for item in excluded):
+                raise ValueError("Lista de exclusões inválida")
+            return {"path": str(path.resolve()), "status": report.get("status"),
+                    "ready": report.get("ready", False), "samples": report.get("samples", 0),
+                    "preprocessed": report.get("preprocessed", 0), "quarantined": len(excluded),
+                    "quarantine": excluded[:200], "truncated": len(excluded) > 200,
+                    "warnings": report.get("warnings", [])}
+        except (OSError, ValueError, TypeError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @router.get("/api/mrflow/datasets/audio")
+    async def dataset_audio(manifest: str, index: int):
+        if index < 0:
+            raise HTTPException(422, "Amostra inválida")
+        try:
+            payload, base = _dataset_module().read_manifest(manifest)
+            rows = payload.get("samples", [])
+            if index >= len(rows):
+                raise HTTPException(404, "Amostra não encontrada")
+            candidate = Path(rows[index]["audio_path"]).expanduser()
+            path = (candidate if candidate.is_absolute() else base / candidate).resolve()
+            if not path.is_file() or path.suffix.lower() not in _dataset_module().AUDIO_EXTENSIONS:
+                raise HTTPException(404, "Áudio não encontrado")
+            return FileResponse(path)
+        except (OSError, ValueError, KeyError, TypeError, IndexError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+
     @router.get("/api/mrflow/pairs/audio")
     async def pair_audio(manifest: str, index: int, branch: str):
         if branch not in {"chosen", "rejected"} or index < 0:
@@ -438,9 +570,9 @@ def install(app, task_manager=None, token: str = "") -> JobManager:
             if _extract_token(request.scope) != token:
                 return await call_next(request)
             async with launch_lock:
-                if path in old_starters and manager.active():
+                if path in old_starters and (manager.active() or manager._toolkit_busy()):
                     from fastapi.responses import JSONResponse
-                    return JSONResponse({"error": "Uma execução MR-FlowDPO está ativa. Pare ou aguarde a execução atual."}, status_code=409)
+                    return JSONResponse({"error": "Uma operação está ativa. Pare ou aguarde a liberação dos modelos antes de iniciar outra."}, status_code=409)
                 return await call_next(request)
         return await call_next(request)
     return manager

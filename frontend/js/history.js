@@ -69,7 +69,7 @@ const History = (() => {
       tr.dataset.detected = detectedOnly ? '1' : '0';
       tr.classList.toggle('history-row--detected', detectedOnly);
       tr.innerHTML = `
-        <td>${_esc(r.run_name)}</td>
+        <td data-no-i18n>${_esc(r.run_name)}</td>
         <td>${_esc(r.adapter)}</td>
         <td>${_esc(r.model)}</td>
         <td>${r.epochs}</td>
@@ -143,7 +143,7 @@ const History = (() => {
     selB.innerHTML = '<option value="">Select run...</option>';
 
     compareRuns.forEach(r => {
-      const opt = `<option value="${_esc(r.run_name)}">${_esc(r.run_name)} (${_esc(r.adapter)}, ${r.best_loss != null ? r.best_loss.toFixed(4) : '--'})</option>`;
+      const opt = `<option data-no-i18n value="${_esc(r.run_name)}">${_esc(r.run_name)} (${_esc(r.adapter)}, ${r.best_loss != null ? r.best_loss.toFixed(4) : '--'})</option>`;
       selA.innerHTML += opt;
       selB.innerHTML += opt;
     });

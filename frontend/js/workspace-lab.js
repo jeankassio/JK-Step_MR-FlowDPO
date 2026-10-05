@@ -411,7 +411,7 @@ const WorkspaceLab = (() => {
         const spectral = Number(m.spectral ?? m.effective_rank ?? 0);
         const rank = m.rank ?? m.assigned_rank ?? "-";
         const tr = document.createElement("tr");
-        tr.innerHTML = `<td class="u-meta-muted-xs">${_e(m.name)}</td><td>${fisher.toFixed(3)}</td><td>${spectral.toFixed(2)}</td><td class="u-text-bold u-text-primary">${_e(rank)}</td>`;
+        tr.innerHTML = `<td data-no-i18n class="u-meta-muted-xs">${_e(m.name)}</td><td>${fisher.toFixed(3)}</td><td>${spectral.toFixed(2)}</td><td class="u-text-bold u-text-primary">${_e(rank)}</td>`;
         tbody.appendChild(tr);
       });
     }
@@ -564,6 +564,7 @@ const WorkspaceLab = (() => {
         const loss = typeof c.loss === "number" ? ` \u2014 loss ${c.loss.toFixed(4)}` : "";
         const epoch = c.epoch ? ` \u2014 epoch ${c.epoch}` : "";
         opt.value = c.path;
+        opt.setAttribute("data-no-i18n", "");
         opt.textContent = `${c.name}${loss || epoch}`;
         sel.appendChild(opt);
       });

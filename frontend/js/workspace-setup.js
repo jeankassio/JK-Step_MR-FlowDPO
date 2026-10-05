@@ -83,7 +83,7 @@ const WorkspaceSetup = (() => {
     const bc = $("file-browser-breadcrumb"); if (!bc) return;
     const norm = _normPath(path);
     const parts = norm.split("/").filter(Boolean);
-    let html = '<span class="fb-breadcrumb__seg" data-fb-path="/">/</span>';
+    let html = '<span data-no-i18n class="fb-breadcrumb__seg" data-fb-path="/">/</span>';
     let cumPath = "";
     parts.forEach((p) => {
       if (!cumPath && _isDrive(p)) {
@@ -91,7 +91,7 @@ const WorkspaceSetup = (() => {
       } else {
         cumPath += (cumPath && !cumPath.endsWith("/") ? "/" : "") + p;
       }
-      html += '<span class="fb-breadcrumb__sep">\u203a</span><span class="fb-breadcrumb__seg" data-fb-path="' + _e(cumPath) + '">' + _e(p) + '</span>';
+      html += '<span class="fb-breadcrumb__sep">\u203a</span><span data-no-i18n class="fb-breadcrumb__seg" data-fb-path="' + _e(cumPath) + '">' + _e(p) + '</span>';
     });
     bc.innerHTML = html;
   }
@@ -131,7 +131,7 @@ const WorkspaceSetup = (() => {
       const isDir = e.is_dir !== false;
       const cls = isDir ? "file-browser__item--dir" : "file-browser__item--file";
       const dp = isDir ? ' data-path="' + _e(full) + '"' : "";
-      html += '<div class="file-browser__item ' + cls + '"' + dp + '><span class="fb-icon">' + (isDir ? "\u25b8" : "\u00b7") + '</span><span>' + _e(e.name) + (isDir ? "/" : "") + '</span></div>';
+      html += '<div class="file-browser__item ' + cls + '"' + dp + '><span class="fb-icon">' + (isDir ? "\u25b8" : "\u00b7") + '</span><span data-no-i18n>' + _e(e.name) + (isDir ? "/" : "") + '</span></div>';
     });
     list.innerHTML = html;
   }
@@ -169,7 +169,7 @@ const WorkspaceSetup = (() => {
         ? '<span class="preset-card__tag preset-card__tag--builtin">built-in</span>'
         : '<span class="preset-card__tag preset-card__tag--user">user</span>';
       card.innerHTML = `
-        <div class="preset-card__name">${_e(p.name)} ${tag}</div>
+        <div class="preset-card__name"><span data-no-i18n>${_e(p.name)}</span> ${tag}</div>
         <div class="preset-card__desc">${_e(p.description || "")}</div>
         <div class="preset-card__meta">${_e(p.adapter_type || "lora")} | r=${_e(p.rank || "?")} | lr=${_e(p.learning_rate || "?")} | ${_e(p.epochs || "?")} epochs</div>
         <div class="preset-card__actions">

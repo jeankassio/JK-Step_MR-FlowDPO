@@ -27,7 +27,7 @@ const ReactivityExt = (() => {
 
     const checkDataset = () => {
       const detectEl = $('ppplus-dataset-detect');
-      const text = detectEl?.textContent || '';
+      const text = jkSourceText(detectEl);
       const match = text.match(/(\d+)\s*(\.pt|tensor|sample)/i);
       const count = match ? parseInt(match[1], 10) : 0;
       if (warnSmall) {
@@ -48,7 +48,7 @@ const ReactivityExt = (() => {
     const lock = () => {
       const ppStatus = $('full-pp-status');
       const ppToggle = $('full-use-ppplus');
-      const hasPP = ppStatus && ppStatus.textContent.includes('[ok]') && (!ppToggle || ppToggle.checked);
+      const hasPP = ppStatus && jkSourceText(ppStatus).includes('[ok]') && (!ppToggle || ppToggle.checked);
       attnSel.disabled = hasPP; attnSel.style.opacity = hasPP ? '0.5' : '';
       mlpToggle.disabled = hasPP; const _tgl = mlpToggle.closest('.toggle'); if (_tgl) _tgl.style.opacity = hasPP ? '0.5' : '';
       if (hasPP) { attnSel.value = 'both'; mlpToggle.checked = true; }

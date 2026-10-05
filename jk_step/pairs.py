@@ -61,7 +61,7 @@ def _split_pairs(pairs: list[dict], fraction: float, seed: int) -> None:
         raise ValueError("validation_fraction must be in [0, 1).")
     groups = sorted({str(p.get("holdout_group") or p["group_id"]) for p in pairs})
     random.Random(seed).shuffle(groups)
-    count = round(len(groups) * fraction)
+    count = round(len(groups) * fraction) if len(groups) > 1 else 0
     if fraction and len(groups) > 1:
         count = max(1, min(count, len(groups) - 1))
     heldout = set(groups[:count])

@@ -213,7 +213,9 @@ const Palette = (() => {
     else {
       filtered = commands.filter((cmd) =>
         cmd.label.toLowerCase().includes(q) ||
+        (window.JKLegacyI18n ? JKLegacyI18n.translate(cmd.label).toLowerCase().includes(q) : false) ||
         cmd.category.toLowerCase().includes(q) ||
+        (window.JKLegacyI18n ? JKLegacyI18n.translate(cmd.category).toLowerCase().includes(q) : false) ||
         (getKeybind(cmd.id) || '').toLowerCase().includes(q)
       );
     }

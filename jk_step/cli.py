@@ -26,14 +26,24 @@ def get_presets() -> dict:
     # The paper's beta is 2000 on its own latent/loss scale. Lower values here
     # are explicit pilot settings, not claimed optimal ACE-Step hyperparameters.
     return {
-        "conservative": {"rank": 32, "alpha": 64, "learning_rate": 1e-6,
+        "sft_lora": {"objective": "sft", "rank": 32, "alpha": 64,
+                     "learning_rate": 1e-5, "optimizer": "adamw",
+                     "batch_size": 1, "gradient_accumulation": 4,
+                     "epochs": 100, "max_latent_length": 0,
+                     "cfg_dropout": 0.1, "warmup_steps": 50},
+        "sft_rank64": {"objective": "sft", "rank": 64, "alpha": 128,
+                       "learning_rate": 1e-5, "batch_size": 1,
+                       "gradient_accumulation": 4, "epochs": 100,
+                       "max_latent_length": 0, "cfg_dropout": 0.1,
+                       "warmup_steps": 50},
+        "conservative": {"objective": "flow_dpo", "rank": 32, "alpha": 64, "learning_rate": 1e-6,
                          "beta": 100, "fm_regularization": 0.1,
                          "target_mlp": False, "batch_size": 1,
                          "gradient_accumulation": 8, "epochs": 2},
-        "rank64": {"rank": 64, "alpha": 128, "learning_rate": 1e-6,
+        "rank64": {"objective": "flow_dpo", "rank": 64, "alpha": 128, "learning_rate": 1e-6,
                    "beta": 100, "fm_regularization": 0.1,
                    "batch_size": 1, "gradient_accumulation": 8, "epochs": 2},
-        "paper_beta": {"rank": 32, "alpha": 64, "learning_rate": 1e-6,
+        "paper_beta": {"objective": "flow_dpo", "rank": 32, "alpha": 64, "learning_rate": 1e-6,
                        "beta": 2000, "fm_regularization": 0.0,
                        "batch_size": 1, "gradient_accumulation": 8, "epochs": 10},
     }
@@ -138,7 +148,7 @@ def _parser() -> argparse.ArgumentParser:
     cfg = sub.add_parser("config", help="Write a full editable training configuration")
     cfg.add_argument("--preset", choices=list(get_presets()), default="conservative")
     cfg.add_argument("--output", default="configs/my_training.json")
-    train = sub.add_parser("train", help="Train an ACE-Step preference LoRA")
+    train = sub.add_parser("train", help="Train an ACE-Step supervised or preference LoRA")
     train.add_argument("--config", help="JSON configuration")
     train.add_argument("--preset", choices=list(get_presets()))
     train.add_argument("--set", action="append", default=[], metavar="KEY=VALUE")
@@ -161,6 +171,17 @@ def _parser() -> argparse.ArgumentParser:
         if field.get("choices"):
             kw["choices"] = field["choices"]
         train.add_argument(option, dest=name, **kw)
+    dataset = sub.add_parser("dataset", help="Prepare a music folder: captions, lyrics, JSON and SFT tensors")
+    ds = dataset.add_subparsers(dest="dataset_command", required=True)
+    inspect = ds.add_parser("inspect", help="Scan an audio folder without loading models")
+    inspect.add_argument("--audio-dir", required=True)
+    prepare = ds.add_parser("prepare", help="Automatically prepare a music folder for supervised or preference LoRA")
+    prepare.add_argument("--audio-dir")
+    prepare.add_argument("--objective", choices=['sft','flow_dpo'])
+    prepare.add_argument("--output", dest="output_dir")
+    prepare.add_argument("--config", help="Optional complete preparation JSON configuration")
+    prepare.add_argument("--options", default="{}", help="Optional JSON object or file with preparation options")
+    prepare.add_argument("--stop-file")
     pairs = sub.add_parser("pairs", help="Create, validate, score and encode preference datasets")
     pair_sub = pairs.add_subparsers(dest="pair_command", required=True)
     build = pair_sub.add_parser("build", help="Import pairs, select MRSD pairs, or degrade existing audio")
@@ -253,6 +274,23 @@ def main(argv: list[str] | None = None) -> int:
             event = _stop_event(args.stop_file)
             result = launch_training(config, progress=emit, stop_event=event)
             emit({"event": "result", "result": result}); return 0
+        if args.command == "dataset":
+            from .dataset_pipeline import inspect_folder, prepare_folder
+            if args.dataset_command == "inspect":
+                emit(inspect_folder(args.audio_dir)); return 0
+            config = _load_json(args.config) if args.config else {}
+            config.update(_load_json(args.options))
+            for name in ("audio_dir", "output_dir", "objective"):
+                if getattr(args, name, None):
+                    config[name] = getattr(args, name)
+            if not str(config.get("audio_dir", "")).strip():
+                raise ValueError("Specify --audio-dir or audio_dir in the configuration")
+            result = prepare_folder(config, progress=emit, stop_event=_stop_event(args.stop_file))
+            emit({"event": "result", "result": result})
+            if result.get("cancelled"):
+                return 0
+            return 0 if result.get("ready") or (not config.get("preprocess", True)
+                                              and result.get("dataset_json")) else 2
         if args.command == "pairs":
             from .pairs import build_preference_pairs, validate_pairs
             if args.pair_command == "validate":

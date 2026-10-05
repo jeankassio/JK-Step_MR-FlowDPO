@@ -60,7 +60,7 @@ const Reactivity = (() => {
 
     function check() {
       const ppStatus = $('full-pp-status');
-      const hasPP = ppStatus && ppStatus.textContent.includes('detected');
+      const hasPP = ppStatus && jkSourceText(ppStatus).includes('detected');
       const lr = parseFloat(lrInput.value);
       if (hasPP && !isNaN(lr) && lr > 1e-4) {
         _showWarning('warn-pp-lr',
@@ -89,7 +89,7 @@ const Reactivity = (() => {
       const maxSteps = parseInt($('full-max-steps')?.value, 10) || 0;
 
       const infoEl = $('full-dataset-info');
-      const match = infoEl?.textContent?.match(/(\d+)\s*samples/);
+      const match = jkSourceText(infoEl).match(/(\d+)\s*samples/);
       const samples = match ? parseInt(match[1], 10) : 0;
       if (!samples) return;
 
@@ -140,7 +140,7 @@ const Reactivity = (() => {
     const update = debounce(() => {
       const ppStatus = $('full-pp-status');
       const ppToggle = $('full-use-ppplus');
-      const hasPP = ppStatus && ppStatus.textContent.includes('detected') && (!ppToggle || ppToggle.checked);
+      const hasPP = ppStatus && jkSourceText(ppStatus).includes('detected') && (!ppToggle || ppToggle.checked);
       const adapter = adapterSel.value;
       const ppCompatible = adapter === 'lora' || adapter === 'dora';
       const shouldLock = hasPP && ppCompatible;
@@ -287,7 +287,7 @@ const Reactivity = (() => {
       const epochs = parseInt(epochsEl.value, 10) || 100;
 
       const infoEl = $('full-dataset-info');
-      const match = infoEl?.textContent?.match(/(\d+)\s*samples/);
+      const match = jkSourceText(infoEl).match(/(\d+)\s*samples/);
       const samples = match ? parseInt(match[1], 10) : 0;
       const bs = parseInt($('full-batch')?.value, 10) || 1;
       const ga = parseInt($('full-grad-accum')?.value, 10) || 4;
