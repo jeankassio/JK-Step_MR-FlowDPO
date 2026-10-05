@@ -1,0 +1,22 @@
+{
+  "auto_download": true,
+  "checkpoint_dir": "checkpoints",
+  "model_variant": "xl-sft",
+  "pairs_manifest": "datasets/muljam_pt_tensors/pairs.preprocessed.json",
+  "output_dir": "output/portuguese-acoustic-pilot",
+  "max_latent_length": 0,
+  "rank": 32,
+  "alpha": 64,
+  "learning_rate": 0.000001,
+  "beta": 100,
+  "fm_regularization": 0.1,
+  "batch_size": 1,
+  "gradient_accumulation": 4,
+  "epochs": 2,
+  "warmup_steps": 1,
+  "cfg_dropout": 0,
+  "multi_gpu": false,
+  "gpu_ids": ["0", "1"],
+  "distributed_backend": "auto",
+  "verify_checksums": true
+}

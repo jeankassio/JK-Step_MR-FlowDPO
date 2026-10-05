@@ -5,7 +5,7 @@
    overrides) and applies them to :root at runtime.
 
    Themes are stored as JSON in assets/themes/ (built-in) and
-   .sidestep/themes/ (user-created).
+   .jk_step/themes/ (user-created).
 
    Usage:
      await Theme.init();             // call once at boot (after UiPrefs.load())

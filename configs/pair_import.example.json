@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "metadata": {"source": "your licensed real recordings and human preferences"},
+  "pairs": [
+    {
+      "id": "song01-pair01",
+      "group_id": "song01",
+      "holdout_group": "artist01",
+      "chosen": "../my_audio/song01_clear.wav",
+      "rejected": "../my_audio/song01_muffled.wav",
+      "caption": "Brazilian pop, female lead vocal, acoustic guitar and drums",
+      "lyrics": "[Verse]\nEscreva aqui a letra exata que ambas as gravações cantam",
+      "metadata": {"bpm": 110, "keyscale": "C major", "language": "pt"},
+      "pair_weight": 1.0
+    }
+  ]
+}

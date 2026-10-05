@@ -1,0 +1,10 @@
+{
+  "device": "auto",
+  "precision": "bf16",
+  "storage_dtype": "bfloat16",
+  "context_mode": "chosen_semantic",
+  "vae_posterior": "mean",
+  "normalize": "none",
+  "max_duration": 0,
+  "checksums": true
+}

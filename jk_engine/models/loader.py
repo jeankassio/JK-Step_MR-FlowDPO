@@ -1,0 +1,595 @@
+"""
+Lean Per-Phase Model Loading for ACE-Step Training V2
+
+Two entry points:
+    load_preprocessing_models()  -- VAE + text encoder + condition encoder
+    load_decoder_for_training()  -- Full model with decoder accessible
+
+Each function loads only what is needed for its phase, supports torch.no_grad()
+context, and provides proper cleanup helpers.
+"""
+
+from __future__ import annotations
+
+import gc
+import json
+import logging
+import os
+import sys
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
+
+import torch
+
+from jk_engine.models.acestep_remote_imports import _ensure_acestep_remote_imports
+
+logger = logging.getLogger(__name__)
+
+
+def _flash_attention_unavailable_reason(device: str, precision: str) -> Optional[str]:
+    """Return None when flash-attn can be used, otherwise a reason string.
+
+    Requirements:
+        1. Device is CUDA.
+        2. Precision is bf16/fp16 (not fp32).
+        3. GPU compute capability >= 8.0 (Ampere / RTX 30xx+).
+        4. ``flash_attn`` package is importable.
+    """
+    if not device.startswith("cuda"):
+        return "target device is not CUDA"
+    if precision == "fp32":
+        return "precision=fp32 is incompatible with flash_attention_2 (use bf16 or fp16)"
+    try:
+        dev_idx = int(device.split(":")[1]) if ":" in device else 0
+        props = torch.cuda.get_device_properties(dev_idx)
+        if props.major < 8:
+            return (
+                f"GPU compute capability {props.major}.{props.minor} < 8.0 "
+                "(Ampere / RTX 30xx+ required)"
+            )
+    except Exception as exc:
+        return f"could not query CUDA device properties: {exc}"
+    try:
+        import flash_attn  # noqa: F401
+    except ImportError:
+        return "flash_attn package is not installed/importable"
+    return None
+
+
+def _print_attn_backend_decision(msg: str) -> None:
+    """Print/log a user-visible backend selection message."""
+    logger.info(msg)
+
+
+def _format_attn_load_error(exc: Exception) -> str:
+    """Compact one-line exception text for fallback diagnostics."""
+    text = str(exc).strip()
+    return text if text else exc.__class__.__name__
+
+
+def _log_attn_fallback(attempted: str, exc: Exception, next_backend: Optional[str]) -> None:
+    """Log fallback status after one attention backend load attempt fails."""
+    reason = _format_attn_load_error(exc)
+    if next_backend:
+        _print_attn_backend_decision(
+            f"attn backend '{attempted}' unavailable ({reason}); trying '{next_backend}'"
+        )
+    else:
+        logger.warning("[WARN] Failed with attn_implementation=%s: %s", attempted, reason)
+
+
+def _choose_attention_candidates(device: str, precision: str) -> tuple[list[str], Optional[str]]:
+    """Return backend candidates in preference order and FA2 skip reason."""
+    fa2_reason = _flash_attention_unavailable_reason(device, precision)
+    candidates = []
+    if fa2_reason is None:
+        candidates.append("flash_attention_2")
+    candidates.extend(["sdpa", "eager"])
+    return candidates, fa2_reason
+
+
+def _selected_attn_status(attn_impl: str) -> str:
+    """Human-friendly final status line for the selected backend."""
+    if attn_impl == "flash_attention_2":
+        return "Using flash_attention_2 (best memory/perf)"
+    if attn_impl == "sdpa":
+        return "Using sdpa fallback (training is valid; memory/perf may be lower than FA2)"
+    if attn_impl == "eager":
+        return "Using eager fallback (slowest; consider enabling sdpa/fa2)"
+    return f"Using attention backend: {attn_impl}"
+
+
+# Variant -> subdirectory mapping
+_VARIANT_DIR = {
+    "turbo": "acestep-v15-turbo",
+    "base": "acestep-v15-base",
+    "sft": "acestep-v15-sft",
+    "xl-turbo": "acestep-v15-xl-turbo",
+    "xl-base": "acestep-v15-xl-base",
+    "xl-sft": "acestep-v15-xl-sft",
+}
+
+
+def _resolve_model_dir(checkpoint_dir: str | Path, variant: str) -> Path:
+    """Return the model subdirectory for *variant* under *checkpoint_dir*.
+
+    Checks the known ``_VARIANT_DIR`` mapping first.  If *variant* is not
+    a recognised alias, it is treated as a literal subdirectory name (to
+    support custom fine-tunes with arbitrary folder names).
+    """
+    base = Path(checkpoint_dir).resolve()
+
+    # 1. Known alias (turbo -> acestep-v15-turbo, etc.)
+    subdir = _VARIANT_DIR.get(variant)
+    if subdir is not None:
+        p = (Path(checkpoint_dir) / subdir).resolve()
+        if p.is_relative_to(base) and p.is_dir():
+            return p
+
+    # 2. Literal subdirectory name (e.g. "my-custom-finetune")
+    p = (Path(checkpoint_dir) / variant).resolve()
+    if p.is_relative_to(base) and p.is_dir():
+        return p
+
+    # 3. None found
+    raise FileNotFoundError(
+        f"Model directory not found: tried {_VARIANT_DIR.get(variant, variant)!r} "
+        f"and {variant!r} under {checkpoint_dir}"
+    )
+
+
+def _resolve_dtype(precision: str) -> torch.dtype:
+    """Map precision string to torch dtype."""
+    mapping = {
+        "bf16": torch.bfloat16,
+        "fp16": torch.float16,
+        "fp32": torch.float32,
+    }
+    return mapping.get(precision, torch.bfloat16)
+
+
+def read_model_config(checkpoint_dir: str | Path, variant: str) -> Dict[str, Any]:
+    """Read and return the model ``config.json`` as a dict.
+
+    Useful for extracting ``timestep_mu``, ``timestep_sigma``,
+    ``data_proportion``, ``is_turbo``, etc. without loading the model.
+    """
+    model_dir = _resolve_model_dir(checkpoint_dir, variant)
+    config_path = model_dir / "config.json"
+    if not config_path.is_file():
+        raise FileNotFoundError(f"config.json not found at {config_path}")
+    return json.loads(config_path.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Decoder loading (for training / estimation)
+# ---------------------------------------------------------------------------
+
+def load_decoder_for_training(
+    checkpoint_dir: str | Path,
+    variant: str = "turbo",
+    device: str = "cpu",
+    precision: str = "bf16",
+) -> Any:
+    """Load the full ``AceStepConditionGenerationModel`` for training.
+
+    The model is loaded in eval mode with gradients disabled on all
+    parameters (the caller -- the trainer -- will selectively enable
+    gradients on LoRA-injected parameters).
+
+    Args:
+        checkpoint_dir: Root checkpoints directory.
+        variant: 'turbo', 'base', or 'sft'.
+        device: Target device string.
+        precision: 'bf16', 'fp16', or 'fp32'.
+
+    Returns:
+        The loaded ``AceStepConditionGenerationModel`` instance.
+    """
+    from transformers import AutoModel
+
+    model_dir = _resolve_model_dir(checkpoint_dir, variant)
+    dtype = _resolve_dtype(precision)
+
+    logger.info("[INFO] Loading model from %s (variant=%s, dtype=%s)", model_dir, variant, dtype)
+
+    # Try attention implementations in preference order.
+    # flash_attention_2 first (matches handler.initialize_service), then sdpa, then eager.
+    attn_candidates, fa2_reason = _choose_attention_candidates(device, precision)
+    if fa2_reason is None:
+        _print_attn_backend_decision("flash_attention_2 appears available; attempting it first")
+    else:
+        _print_attn_backend_decision(
+            f"flash_attention_2 unavailable: {fa2_reason}. Falling back to sdpa/eager."
+        )
+
+    # Older / newer ACE-Step snapshots import ``acestep.models...`` in modeling
+    # files.  See :func:`_ensure_acestep_remote_imports`.
+    _ensure_acestep_remote_imports()
+
+    # XL checkpoints import nested ``acestep.models.xl_*`` packages.  Register
+    # namespace stubs only when not already provided by a real ACE-Step tree.
+    import importlib.util
+    import types as _types
+
+    # Only XL variant packages; do not stub common/base/turbo/sft here or we
+    # can shadow a real ``acestep`` tree already on ``sys.path``.
+    _variant_submodules = (
+        "acestep.models.xl_base",
+        "acestep.models.xl_turbo",
+        "acestep.models.xl_sft",
+    )
+    for submodule in _variant_submodules:
+        if submodule not in sys.modules:
+            _sub_stub = _types.ModuleType(submodule)
+            _sub_stub.__path__ = []
+            sys.modules[submodule] = _sub_stub
+
+    def _load_acestep_module(module_name: str, file_path: Path) -> None:
+        """Load a Python file from an ACE-Step checkout when imports are still missing."""
+        if module_name in sys.modules:
+            return
+        if not file_path.is_file():
+            return
+        try:
+            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            if spec and spec.loader:
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
+        except Exception as exc:
+            exc_text = str(exc)
+            if "huggingface-hub" in exc_text or "transformers" in exc_text or "dependency" in exc_text:
+                logger.debug("Dependency issue loading %s (non-fatal): %s", module_name, exc)
+            else:
+                logger.debug("Could not load ACE-Step module %s: %s", module_name, exc)
+
+    # Resolve ``acestep/models/common`` next to the checkpoint root (e.g.
+    # ``.../ACE-Step-1.5/checkpoints`` -> ``.../ACE-Step-1.5/acestep/...``).
+    ckpt_root = Path(checkpoint_dir).resolve()
+    acestep_root_candidates = (
+        ckpt_root.parent / "acestep" / "models" / "common",
+        ckpt_root.parent.parent / "ACE-Step-1.5" / "acestep" / "models" / "common",
+        Path("../ACE-Step-1.5/acestep/models/common").resolve(),
+    )
+    acestep_root = next((p for p in acestep_root_candidates if p.is_dir()), None)
+
+    if acestep_root is not None:
+        _load_acestep_module(
+            "acestep.models.common.configuration_acestep_v15",
+            acestep_root / "configuration_acestep_v15.py",
+        )
+        _load_acestep_module(
+            "acestep.models.common.apg_guidance",
+            acestep_root / "apg_guidance.py",
+        )
+
+    if "acestep.models.common.configuration_acestep_v15" not in sys.modules:
+        sys.modules["acestep.models.common.configuration_acestep_v15"] = _types.ModuleType(
+            "acestep.models.common.configuration_acestep_v15"
+        )
+    if "acestep.models.common.apg_guidance" not in sys.modules:
+        sys.modules["acestep.models.common.apg_guidance"] = _types.ModuleType(
+            "acestep.models.common.apg_guidance"
+        )
+
+    model = None
+    last_err: Optional[Exception] = None
+
+    # ``device_map`` tells transformers/accelerate to place weights directly on
+    # the target device during ``from_pretrained``. This avoids a later
+    # ``model.to(device)`` that fails on non-persistent buffers (e.g.
+    # ``Qwen3RotaryEmbedding.inv_freq``) left on the ``meta`` device when
+    # low_cpu_mem_usage meta-init ran against submodules built from a
+    # ``copy.deepcopy(config)`` -- observed on XL checkpoints where
+    # encoder/tokenizer/detokenizer use a separate encoder config.
+    device_map = {"": device}
+
+    for idx, attn_impl in enumerate(attn_candidates):
+        try:
+            model = AutoModel.from_pretrained(
+                str(model_dir),
+                trust_remote_code=True,
+                attn_implementation=attn_impl,
+                torch_dtype=dtype,
+                device_map=device_map,
+            )
+            setattr(model, "_side_step_attn_backend", attn_impl)
+            logger.info("[OK] Model loaded with attn_implementation=%s", attn_impl)
+            _print_attn_backend_decision(_selected_attn_status(attn_impl))
+            break
+        except (ImportError, EnvironmentError) as exc:
+            # Missing-package errors (e.g. "acestep" from an outdated
+            # checkpoint) are not attention-backend issues -- surface
+            # a clear message instead of cycling through backends.
+            err_text = str(exc)
+            if "packages that were not found" in err_text or "No module named" in err_text:
+                raise RuntimeError(
+                    f"The model files in {model_dir} require a Python package "
+                    f"that is not installed.\n\n"
+                    f"  Original error: {err_text}\n\n"
+                    f"If the error names ``acestep`` or ``acestep.models``, ensure "
+                    f"Side-Step can resolve the bundled/common ACE-Step modules "
+                    f"(set ``ACESTEP_SRC`` to a full ACE-Step checkout, or place "
+                    f"``ACE-Step-1.5`` next to the Side-Step repo). "
+                    f"Checkpoint Python stubs may also be outdated; try re-downloading "
+                    f"weights from HuggingFace.\n"
+                    f"If the error names other packages, check that "
+                    f"'vector_quantize_pytorch' and 'einops' are installed."
+                ) from exc
+            last_err = exc
+            next_backend = attn_candidates[idx + 1] if idx + 1 < len(attn_candidates) else None
+            _log_attn_fallback(attn_impl, exc, next_backend)
+        except Exception as exc:
+            last_err = exc
+            next_backend = attn_candidates[idx + 1] if idx + 1 < len(attn_candidates) else None
+            _log_attn_fallback(attn_impl, exc, next_backend)
+
+    if model is None:
+        raise RuntimeError(
+            f"Failed to load model from {model_dir}: {last_err}"
+        ) from last_err
+
+    # Freeze everything by default -- trainer will unfreeze LoRA params
+    for param in model.parameters():
+        param.requires_grad = False
+
+    # ``device_map`` already placed weights on *device* in *dtype*. A plain
+    # ``.to(device=device)`` would re-trigger the meta-tensor copy path for
+    # non-persistent buffers on XL checkpoints. Only enforce dtype if any
+    # parameter slipped through (e.g. a future change to the upstream config).
+    if any(p.dtype != dtype for p in model.parameters()):
+        model = model.to(dtype=dtype)
+    model.eval()
+
+    logger.info("[OK] Model on %s (%s), all params frozen", device, dtype)
+    return model
+
+
+# ---------------------------------------------------------------------------
+# Preprocessing models (VAE + text encoder + condition encoder)
+# ---------------------------------------------------------------------------
+
+def load_preprocessing_models(
+    checkpoint_dir: str | Path,
+    variant: str = "turbo",
+    device: str = "cpu",
+    precision: str = "bf16",
+) -> Dict[str, Any]:
+    """Load only models needed for the preprocessing phase.
+
+    Returns a dict with keys:
+        - ``model``: the full ``AceStepConditionGenerationModel``
+        - ``vae``: ``AutoencoderOobleck`` (or None)
+        - ``text_tokenizer``: HuggingFace tokenizer
+        - ``text_encoder``: Qwen3 text encoder
+
+    The caller must call :func:`cleanup_preprocessing_models` when done.
+    """
+    from transformers import AutoModel, AutoTokenizer
+    from diffusers.models import AutoencoderOobleck
+
+    ckpt = Path(checkpoint_dir)
+    dtype = _resolve_dtype(precision)
+    result: Dict[str, Any] = {}
+
+    # 1. Full model (needed for condition encoder)
+    model = load_decoder_for_training(checkpoint_dir, variant, device, precision)
+    result["model"] = model
+
+    # 2. VAE
+    vae_path = ckpt / "vae"
+    if vae_path.is_dir():
+        vae = AutoencoderOobleck.from_pretrained(str(vae_path), torch_dtype=dtype)
+        vae = vae.to(device=device)
+        vae.eval()
+        result["vae"] = vae
+        logger.info("[OK] VAE loaded from %s", vae_path)
+    else:
+        result["vae"] = None
+        logger.warning("[WARN] VAE directory not found: %s", vae_path)
+
+    # 3. Text encoder + tokenizer
+    text_path = ckpt / "Qwen3-Embedding-0.6B"
+    if text_path.is_dir():
+        result["text_tokenizer"] = AutoTokenizer.from_pretrained(str(text_path))
+        text_enc = AutoModel.from_pretrained(str(text_path), torch_dtype=dtype)
+        text_enc = text_enc.to(device=device)
+        text_enc.eval()
+        result["text_encoder"] = text_enc
+        logger.info("[OK] Text encoder loaded from %s", text_path)
+    else:
+        result["text_tokenizer"] = None
+        result["text_encoder"] = None
+        logger.warning("[WARN] Text encoder directory not found: %s", text_path)
+
+    return result
+
+
+def cleanup_preprocessing_models(models: Dict[str, Any]) -> None:
+    """Free memory occupied by preprocessing models.
+
+    Moves tensors to CPU, deletes references, and forces garbage collection.
+    """
+    for key in list(models.keys()):
+        obj = models.pop(key, None)
+        if obj is not None and hasattr(obj, "to"):
+            try:
+                obj.to("cpu")
+            except Exception:
+                pass
+        del obj
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    elif hasattr(torch, 'mps') and torch.mps.is_available():
+        torch.mps.empty_cache()
+    elif hasattr(torch, 'xpu') and torch.xpu.is_available():
+        torch.xpu.empty_cache()
+    logger.info("[OK] Preprocessing models cleaned up")
+
+
+# ---------------------------------------------------------------------------
+# Per-component loaders (for sequential / low-VRAM preprocessing)
+# ---------------------------------------------------------------------------
+
+def load_vae(
+    checkpoint_dir: str | Path,
+    device: str = "cpu",
+    precision: str = "bf16",
+) -> Any:
+    """Load only the VAE (``AutoencoderOobleck``).
+
+    Returns the VAE model in eval mode, or raises ``FileNotFoundError``
+    if the ``vae/`` directory is missing.
+    """
+    from diffusers.models import AutoencoderOobleck
+
+    vae_path = Path(checkpoint_dir) / "vae"
+    if not vae_path.is_dir():
+        raise FileNotFoundError(f"VAE directory not found: {vae_path}")
+
+    dtype = _resolve_dtype(precision)
+    vae = AutoencoderOobleck.from_pretrained(str(vae_path), torch_dtype=dtype)
+    vae = vae.to(device=device)
+    vae.eval()
+    logger.info("[OK] VAE loaded from %s (%s)", vae_path, dtype)
+    return vae
+
+
+def load_text_encoder(
+    checkpoint_dir: str | Path,
+    device: str = "cpu",
+    precision: str = "bf16",
+) -> Tuple[Any, Any]:
+    """Load the text tokenizer and encoder (Qwen3-Embedding-0.6B).
+
+    Returns:
+        ``(tokenizer, text_encoder)`` -- both ready for inference.
+
+    Raises ``FileNotFoundError`` if the encoder directory is missing.
+    """
+    from transformers import AutoModel, AutoTokenizer
+
+    text_path = Path(checkpoint_dir) / "Qwen3-Embedding-0.6B"
+    if not text_path.is_dir():
+        raise FileNotFoundError(f"Text encoder directory not found: {text_path}")
+
+    dtype = _resolve_dtype(precision)
+    tokenizer = AutoTokenizer.from_pretrained(str(text_path))
+    encoder = AutoModel.from_pretrained(str(text_path), torch_dtype=dtype)
+    encoder = encoder.to(device=device)
+    encoder.eval()
+    logger.info("[OK] Text encoder loaded from %s (%s)", text_path, dtype)
+    return tokenizer, encoder
+
+
+def load_silence_latent(
+    checkpoint_dir: str | Path,
+    device: str = "cpu",
+    precision: str = "bf16",
+    variant: str | None = None,
+) -> torch.Tensor:
+    """Load ``silence_latent.pt`` from the checkpoint directory.
+
+    The tensor is transposed to match the handler convention
+    ``(1, T, 64)`` and moved to *device* / *dtype*.
+
+    Search order:
+        1. ``checkpoint_dir/silence_latent.pt`` (root -- custom layouts)
+        2. ``<resolved_model_dir>/silence_latent.pt`` for the requested
+           variant (resolved via :func:`_resolve_model_dir`)
+        3. Scan all known official variant subdirectories as a last-resort
+           fallback (**logs a high-visibility warning**)
+
+    Raises ``FileNotFoundError`` if the file cannot be found anywhere.
+    """
+    ckpt = Path(checkpoint_dir)
+    ckpt_root = ckpt.resolve()
+    sl_path: Path | None = None
+    variant_resolution_error: str | None = None
+    used_last_resort_fallback = False
+
+    # 1. Direct root path
+    candidate = ckpt / "silence_latent.pt"
+    if candidate.is_file():
+        sl_path = candidate
+
+    # 2. Variant-specific subdirectory
+    if sl_path is None and variant is not None:
+        try:
+            model_dir = _resolve_model_dir(ckpt, variant)
+            candidate = (model_dir / "silence_latent.pt").resolve()
+            if candidate.is_relative_to(ckpt_root) and candidate.is_file():
+                sl_path = candidate
+            else:
+                variant_resolution_error = (
+                    f"resolved model directory '{model_dir.name}' has no silence_latent.pt"
+                )
+        except FileNotFoundError as exc:
+            variant_resolution_error = str(exc)
+
+    # 3. Last-resort: scan all known variant subdirectories
+    if sl_path is None:
+        for subdir in _VARIANT_DIR.values():
+            candidate = ckpt / subdir / "silence_latent.pt"
+            if candidate.is_file():
+                sl_path = candidate
+                used_last_resort_fallback = True
+                break
+
+    if sl_path is not None and used_last_resort_fallback:
+        logger.warning("[WARN] =============================================================")
+        logger.warning("[WARN] !!! SILENCE LATENT FALLBACK ACTIVATED !!!")
+        logger.warning(
+            "[WARN] Requested variant: %s",
+            variant if variant is not None else "<none>",
+        )
+        if variant_resolution_error:
+            logger.warning("[WARN] Resolution detail: %s", variant_resolution_error)
+        logger.warning("[WARN] Using fallback silence_latent file: %s", sl_path)
+        logger.warning(
+            "[WARN] This can indicate a variant mismatch or missing file. "
+            "Preprocessing may not match your selected model."
+        )
+        logger.warning("[WARN] =============================================================")
+
+    if sl_path is None:
+        detail = f"; variant detail: {variant_resolution_error}" if variant_resolution_error else ""
+        raise FileNotFoundError(
+            f"silence_latent.pt not found under {ckpt} "
+            f"(checked root and variant subdirectories){detail}"
+        )
+
+    dtype = _resolve_dtype(precision)
+    sl = torch.load(str(sl_path), weights_only=True).transpose(1, 2)
+    sl = sl.to(device=device, dtype=dtype)
+    logger.info("[OK] silence_latent loaded from %s", sl_path)
+    return sl
+
+
+def unload_models(*models: Any) -> None:
+    """Move models to CPU, delete references, and free GPU memory.
+
+    Accepts any number of model objects (or ``None`` values, which are
+    silently skipped).
+    """
+    for obj in models:
+        if obj is None:
+            continue
+        if hasattr(obj, "to"):
+            try:
+                obj.to("cpu")
+            except Exception:
+                pass
+        del obj
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    elif hasattr(torch, 'mps') and torch.mps.is_available():
+        torch.mps.empty_cache()
+    elif hasattr(torch, 'xpu') and torch.xpu.is_available():
+        torch.xpu.empty_cache()
+    logger.info("[OK] Models unloaded and GPU cache cleared")

@@ -1,0 +1,9 @@
+{
+  "mode": "degraded",
+  "degradation": ["lowpass", "noise"],
+  "cutoff_hz": 4000,
+  "noise_snr_db": 24,
+  "variations_per_audio": 2,
+  "validation_fraction": 0.1,
+  "seed": 42
+}

@@ -1,0 +1,27 @@
+# JK-Step tested stack; install torch/torchaudio/torchvision separately first.
+transformers>=4.51,<4.58
+peft>=0.18,<0.20
+accelerate>=1.12,<2
+safetensors>=0.6
+einops>=0.8.1
+vector-quantize-pytorch>=1.27.15
+diffusers>=0.32
+lightning>=2.3.3
+soundfile>=0.13.1
+pyloudnorm>=0.1
+numpy>=1.26,<2
+scipy>=1.12,<1.16
+librosa>=0.10,<0.12
+torchcodec>=0.10,<0.11
+loguru>=0.7.3
+tensorboard>=2.20
+rich>=13
+fastapi>=0.115
+uvicorn[standard]>=0.34
+mutagen>=1.47
+nvidia-ml-py>=12
+huggingface-hub>=0.34,<1
+hf-xet>=1.1
+lycoris-lora>=2
+prodigyopt>=1.1.2
+bitsandbytes>=0.45; platform_system != 'Darwin'

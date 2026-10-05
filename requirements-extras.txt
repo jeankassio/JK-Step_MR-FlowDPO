@@ -1,0 +1,7 @@
+# Side-Step captioning, transcription, stem separation and TUI integrations.
+lyricsgenius>=3.0.1
+google-genai>=1
+openai>=1.54
+qwen-omni-utils>=0.0.6
+demucs>=4.0
+textual>=0.47

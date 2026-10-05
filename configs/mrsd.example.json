@@ -1,0 +1,13 @@
+{
+  "mode": "scored",
+  "axes": ["text_alignment", "production_quality", "semantic_consistency"],
+  "protected_axes": {"lyric_fidelity": 0.0},
+  "minimum_protected_scores": {"lyric_fidelity": 0.95},
+  "primary_quantile": 0.95,
+  "secondary_quantile": 0.5,
+  "minimum_quantile": 0.05,
+  "semantic_max_quantile": 0.99,
+  "balance_axes": true,
+  "validation_fraction": 0.1,
+  "seed": 42
+}

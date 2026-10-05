@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Side-Step</title>
+  <title>JK-Step MR-FlowDPO · SFT e Datasets</title>
   <link rel="icon" type="image/x-icon" href="favicon.ico">
   <link rel="icon" type="image/png" sizes="256x256" href="icon.png">
   <link rel="stylesheet" href="css/tokens.css">
@@ -19,13 +19,7 @@
      Splash / Initializer (shown during boot, fades out when ready)
      ============================================================ -->
 <div class="splash" id="splash">
-  <pre class="splash__banner" id="splash-banner"> ░▒▓███████▓▒░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░░▒▓███████▓▒░▒▓████████▓▒░▒▓████████▓▒░▒▓███████▓▒░
-░▒▓█▓▒░      ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░         ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░
-░▒▓█▓▒░      ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░         ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░
- ░▒▓██████▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓██████▓▒░  ░▒▓██████▓▒░   ░▒▓█▓▒░   ░▒▓██████▓▒░ ░▒▓███████▓▒░
-       ░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░             ░▒▓█▓▒░  ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░
-       ░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░             ░▒▓█▓▒░  ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░
-░▒▓███████▓▒░░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░▒▓███████▓▒░   ░▒▓█▓▒░   ░▒▓████████▓▒░▒▓█▓▒░</pre>
+  <pre class="splash__banner" id="splash-banner">░▒▓ JK-STEP MR-FlowDPO ▓▒░</pre>
   <div class="splash__status" id="splash-status">Initializing...</div>
   <div class="splash__bar"><div class="splash__bar-fill" id="splash-bar-fill"></div></div>
 </div>
@@ -39,11 +33,14 @@
 <div class="welcome-overlay hidden" id="welcome-overlay" style="display:none;pointer-events:none;">
   <div class="welcome-card">
     <div class="welcome-card__header">
-      <span style="font-size:var(--font-size-3xl);font-weight:700;color:var(--primary);">Welcome to Side-Step</span>
+      <span style="font-size:var(--font-size-3xl);font-weight:700;color:var(--primary);">Welcome to JK-Step MR-FlowDPO</span>
       <span style="font-size:var(--font-size-sm);color:var(--muted);margin-top:2px;">BETA 1 — Music LoRA Training Toolkit</span>
     </div>
     <p style="color:var(--fg);font-size:var(--font-size-sm);margin-bottom:var(--space-md);">
       Let's set up the essentials. You can always change these later in Settings.
+    </p>
+    <p style="color:var(--muted);font-size:var(--font-size-sm);margin-bottom:var(--space-md);">
+      Original toolkit: <a href="https://github.com/koda-dernet/Side-Step" target="_blank" rel="noopener noreferrer">Side-Step</a>, copyright &copy; 2026 koda-dernet. CC BY-NC-SA 4.0.
     </p>
     <div class="section-header" style="margin-bottom:var(--space-sm);">Directories</div>
     <div class="form-group">
@@ -110,13 +107,14 @@
        Top Bar
        ============================================================ -->
   <header class="topbar">
-    <span class="topbar__logo">░▒▓ SIDE-STEP <span class="topbar__version">v1.1-beta</span></span>
+    <span class="topbar__logo">░▒▓ JK-STEP <span class="topbar__version">MR-FlowDPO · SFT · Datasets</span></span>
     <span class="topbar__divider"></span>
     <nav class="topbar__modes">
       <button class="topbar__mode active" data-mode="ez">Ez Mode <span class="kbd">⌥1</span></button>
       <button class="topbar__mode" data-mode="full">Advanced <span class="kbd">⌥2</span></button>
       <button class="topbar__mode" data-mode="monitor">Monitor <span class="kbd">⌥3</span></button>
       <button class="topbar__mode" data-mode="lab">Lab <span class="kbd">⌥4</span></button>
+      <a class="topbar__mode" href="/quality" onclick="this.href='/quality?token='+encodeURIComponent(window.__SIDESTEP_TOKEN__ || new URLSearchParams(location.search).get('token') || '')">MR-FlowDPO ↗</a>
     </nav>
     <span class="topbar__spacer"></span>
     <span class="topbar__status-chip topbar__status-chip--idle" id="topbar-status-chip">Idle</span>
@@ -142,23 +140,14 @@
 
         <!-- ASCII Banner — click to cycle: BlurVision → TUI drop-shadow → Compact -->
         <div id="logo-container" style="cursor: pointer; user-select: none;" title="Click to change logo style">
-          <pre class="ascii-banner logo-variant active" id="logo-blurvision"> ░▒▓███████▓▒░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░░▒▓███████▓▒░▒▓████████▓▒░▒▓████████▓▒░▒▓███████▓▒░
-░▒▓█▓▒░      ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░         ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░
-░▒▓█▓▒░      ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░         ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░
- ░▒▓██████▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓██████▓▒░  ░▒▓██████▓▒░   ░▒▓█▓▒░   ░▒▓██████▓▒░ ░▒▓███████▓▒░
-       ░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░             ░▒▓█▓▒░  ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░
-       ░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░             ░▒▓█▓▒░  ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░
-░▒▓███████▓▒░░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░▒▓███████▓▒░   ░▒▓█▓▒░   ░▒▓████████▓▒░▒▓█▓▒░</pre>
-          <pre class="ascii-banner logo-variant" id="logo-tui" style="display:none;"> ███████╗██╗██████╗ ███████╗    ███████╗████████╗███████╗██████╗
- ██╔════╝██║██╔══██╗██╔════╝    ██╔════╝╚══██╔══╝██╔════╝██╔══██╗
- ███████╗██║██║  ██║█████╗█████╗███████╗   ██║   █████╗  ██████╔╝
- ╚════██║██║██║  ██║██╔══╝╚════╝╚════██║   ██║   ██╔══╝  ██╔═══╝
- ███████║██║██████╔╝███████╗    ███████║   ██║   ███████╗██║
- ╚══════╝╚═╝╚═════╝ ╚══════╝    ╚══════╝   ╚═╝   ╚══════╝╚═╝</pre>
-          <pre class="ascii-banner logo-variant" id="logo-compact" style="display:none;">
-  ░▒▓ S I D E · S T E P ▓▒░</pre>
+          <pre class="ascii-banner logo-variant active" id="logo-blurvision">░▒▓ J K - S T E P ▓▒░
+     MR-FlowDPO</pre>
+          <pre class="ascii-banner logo-variant" id="logo-tui" style="display:none;">+----------------------+
+| JK-STEP MR-FlowDPO   |
++----------------------+</pre>
+          <pre class="ascii-banner logo-variant" id="logo-compact" style="display:none;">░▒▓ JK-STEP MR-FlowDPO ▓▒░</pre>
         </div>
-        <div class="ascii-motto motto-breathe" id="ez-motto">"Side-Step: The 17-Hour Speedrun."</div>
+        <div class="ascii-motto motto-breathe" id="ez-motto">JK-Step MR-FlowDPO · Music Preference Training</div>
 
         <!-- --- Get Started --- -->
         <div class="section-header">Get Started</div>
@@ -210,7 +199,7 @@
           <div class="detect" id="ez-dataset-detect"></div>
           <div id="help-ez-dataset" class="help-panel">
             <h4>What is this?</h4>
-            <p>Select a dataset folder. Side-Step scans your configured directories:</p>
+            <p>Select a dataset folder. JK-Step MR-FlowDPO scans your configured directories:</p>
             <ul>
               <li><strong>Preprocessed .pt tensors</strong> — from your tensors directory</li>
               <li><strong>Audio files</strong> (.wav, .mp3, .flac) — will be auto-preprocessed before training</li>
@@ -1399,7 +1388,7 @@
               <div class="form-group">
                 <label class="form-group__label">Output directory override <span class="help-icon" data-help="help-full-output">?</span></label>
                 <div id="help-full-output" class="help-panel">
-                  <p><strong>Simple:</strong> Override the auto-generated output path. By default, Side-Step saves to <code>{adapters_dir}/{adapter_type}/{run_name}/</code>.</p>
+                  <p><strong>Simple:</strong> Override the auto-generated output path. By default, JK-Step MR-FlowDPO saves to <code>{adapters_dir}/{adapter_type}/{run_name}/</code>.</p>
                   <p>Only use this if you need a specific location. Leave empty for the standard auto-derived path.</p>
                 </div>
                 <div class="input-with-browse">
@@ -3066,7 +3055,7 @@
   <div class="modal" id="exit-confirm-modal">
     <div class="modal__content" style="max-width: 420px;">
       <div class="modal__header">
-        <span class="modal__title">Close Side-Step</span>
+        <span class="modal__title">Close JK-Step MR-FlowDPO</span>
         <button class="modal__close" id="exit-confirm-close">x</button>
       </div>
       <div class="modal__body">

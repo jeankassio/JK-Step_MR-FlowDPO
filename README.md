@@ -1,315 +1,283 @@
-# Side-Step for ACE-Step 1.5
+# JK-Step MR-FlowDPO
 
-> [!WARNING]
-> **Deprecated — archival period ends March 1, 2027.** This implementation is
-> preserved for six months as a reference for existing users and for the
-> measured training, conditioning, evaluation, and low-VRAM work it contains.
-> It will receive only critical maintenance during that period and will then
-> be archived as read-only. Development is moving to a clean-slate successor
-> because this repository accumulated overlapping UI stacks, an oversized
-> configuration surface, CUDA-specific assumptions, and experimental features
-> faster than they could be benchmarked and validated. The rewrite will retain
-> proven behavior while prioritizing cross-accelerator support, training speed,
-> low-VRAM operation, a compact namespace, unified schemas, and evidence-backed
-> features.
+**English** · [Portuguese (Brazil)](README_PTBR.md)
 
-```
- ░▒▓███████▓▒░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░░▒▓███████▓▒░▒▓████████▓▒░▒▓████████▓▒░▒▓███████▓▒░ 
-░▒▓█▓▒░      ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░         ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░
-░▒▓█▓▒░      ░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░      ░▒▓█▓▒░         ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░░▒▓█▓▒░
- ░▒▓██████▓▒░░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓██████▓▒░  ░▒▓██████▓▒░   ░▒▓█▓▒░   ░▒▓██████▓▒░ ░▒▓███████▓▒░ 
-       ░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░             ░▒▓█▓▒░  ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░       
-       ░▒▓█▓▒░▒▓█▓▒░▒▓█▓▒░░▒▓█▓▒░▒▓█▓▒░             ░▒▓█▓▒░  ░▒▓█▓▒░   ░▒▓█▓▒░      ░▒▓█▓▒░       
-░▒▓███████▓▒░░▒▓█▓▒░▒▓███████▓▒░░▒▓████████▓▒░▒▓███████▓▒░   ░▒▓█▓▒░   ░▒▓████████▓▒░▒▓█▓▒░       
- by dernet -- BETA
-```
+Preference-based LoRA training for **ACE-Step 1.5 SFT and SFT XL**, with a command-line interface, a local browser UI, and a dataset toolkit derived from [Side-Step](https://github.com/koda-dernet/Side-Step).
 
-**Standalone training toolkit for ACE-Step 1.5 audio generation models.**
-Takes you from raw audio files to a working adapter without the friction. Variant-aware multi-adapter fine-tuning (LoRA, DoRA, LoKR, LoHA, OFT) with auto-detection, low-VRAM support, and three ways to work.
+The goal is to investigate general musical and acoustic quality while preserving lyric fidelity. You can build datasets from existing recordings; **generating music with Turbo is not required**. The adapter changes the generation model itself, without applying mastering, equalization, or other post-processing to generated songs.
 
-> **Status:** v1.1.2-beta -- Stable enough for daily use. Some features are still experimental. This is maintained by one person only; if you encounter an issue, please let me know in the issues tab.
+![JK-Step MR-FlowDPO browser interface](assets/Screenshots/JK-Step_MR-FlowDPO.png)
 
-## Why Side-Step?
+**Research status:** this is an experimental ACE-Step adaptation of [MR-FlowDPO](https://arxiv.org/abs/2512.10264). The paper evaluated instrumental generation with other flow-matching models. Software tests establish that the trainer executes, updates LoRA weights, and freezes the base; they do not establish improved music or guaranteed pronunciation preservation. See [validation results](docs/VALIDATION.md).
 
-Side-Step auto-detects your model variant (base, sft, or turbo), selects the scientifically correct training schedule, and runs on consumer hardware down to 8 GB VRAM. Version 1.1.2 adds user-selectable timestep sampling (continuous or discrete) across all three interfaces, building on 1.1.1's Music Flamingo/Transcriber Server providers, batched caption jobs, TensorBoard-parity charts, and training pipeline improvements.
+## Included features
 
-### What was already here
+- A real Flow-DPO objective with the original frozen SFT as its reference, without keeping a second XL model on each GPU.
+- Configurable LoRA rank, alpha, dropout, rsLoRA, per-module overrides, decoder layers, self/cross attention, and MLP targets.
+- Multi-reward pair selection, human-pair import, controlled degradation pairs, shared-conditioning preprocessing, and tensor caches.
+- Configuration through CLI flags, JSON, or UI; monitoring, cancellation, checkpoints, resume, and ComfyUI export.
+- Dataset organization, captions, lyrics, sidecars, audio analysis, stems, PP++, and supervised adapter tools inherited from Side-Step. Some integrations need optional packages, API credentials, or additional models.
+- Automatic downloads of the default pure SFT XL and preprocessing models, using this trainer's environment and checkpoint directory.
 
-- **Auto-Configured Training** -- All variants default to continuous logit-normal sampling + CFG dropout. Optionally switch to discrete 8-step sampling via `--timestep-mode discrete` (CLI), the Wizard, or the GUI dropdown. The upstream trainer forces the Turbo schedule on all models; Side-Step fixes this automatically.
-- **LoRA + LoKR Adapters** -- Standard and Kronecker-product low-rank fine-tuning.
-- **Preprocessing++ (PP++)** -- Fisher Information analysis assigns adaptive per-module ranks based on how important each layer is to *your specific audio*. Writes a `fisher_map.json` that training auto-detects.
-- **Two-Pass Preprocessing** -- Converts raw audio to training tensors in two low-memory passes (~3 GB then ~6 GB).
-- **Interactive Wizard** -- Step-by-step prompts with "Go Back" support, presets, flow chaining, and session carry-over defaults.
-- **Dataset Builder** -- Point at a folder of audio + sidecar `.txt` files and get a `dataset.json` automatically.
-- **Low VRAM** -- 8-bit optimizers, gradient checkpointing, encoder offloading. Trains down to ~10 GB.
-- **Standalone & Portable** -- Installs as its own project via `uv`. No need to touch your ACE-Step installation.
-
-### New in 1.0.0
-
-- **Full Electron GUI** -- Desktop application with Ez Mode (3-click training), Advanced Mode (every knob), real-time Monitor (loss charts, GPU stats), and a Lab workspace (datasets, preprocessing, PP++, export). CRT shader with phosphor bloom, scanlines, and chromatic aberration. Themeable (4 built-in themes + full editor).
-- **DoRA, LoHA, OFT Adapters** -- Three additional adapter architectures alongside LoRA and LoKR.
-- **ComfyUI Export** -- Convert PEFT LoRA/DoRA adapters to the single-file `.safetensors` format ComfyUI expects. LyCORIS adapters (LoKR, LoHA) are already natively compatible.
-- **AI Captioning** -- Generate sidecar metadata with **local AI** (Qwen2.5-Omni, no API key, runs on your GPU), Google Gemini, OpenAI, or lyrics scraped from Genius.
-- **Offline Audio Analysis** -- BPM, key, and time signature extraction via `demucs` stem separation + `librosa`. No API keys required.
-- **Built-in Music Player** -- Play dataset audio directly in the GUI. Marquee display, EQ visualizer, volume control, auto-play, dockable bar.
-- **Live VRAM Estimation** -- Segmented bar shows model + activation + optimizer breakdown before you start training. Changes reactively as you adjust settings.
-- **VRAM Presets** -- One-click profiles: 8 GB, 12 GB, 16 GB, 24 GB+, Quick Test, High Quality, Recommended.
-- **Run History** -- Persistent log of past training runs with best loss, adapter path, and hyperparameters.
-- **Tag Management** -- Bulk add/remove trigger tags and convert legacy sidecar formats.
-- **Cross-Platform Entry Point** -- `sidestep` (or `uv run sidestep` if not on PATH) works on all platforms.
-
-### New in 1.1.0
-
-- **Cruise Control (Target Loss)** -- Set a target loss value and Side-Step automatically damps the learning rate as training approaches it, holding the model at a sweet spot instead of over-fitting past it. EMA-smoothed loss signal, configurable warmup and floor. Works with all schedulers (conflict guards for Prodigy and cosine restarts). Resumes cleanly from checkpoints.
-- **Caption System Overhaul** -- Richer song-focused prompts that emphasize audible content over generic descriptions. Configurable generation parameters (temperature, top_p, penalties). Structured response parsing extracts genre, BPM, key, and time signature alongside the caption. Google Search grounding for Gemini. Lossless audio auto-converted to MP3 before upload to save bandwidth.
-- **Local Captioner Rewrite** -- Qwen2.5-Omni local captioner rebuilt with tiered VRAM configs, OOM recovery (retries with reduced token count), CPU offload option, audio transcoding fallback, cancellation support, and timing logs.
-- **Default Model Variant: Base** -- Base is now the recommended default everywhere (CLI, GUI, wizard, TUI, presets). Turbo remains available but is no longer the automatic first choice. Model variant dropdown auto-selects base > sft > turbo based on what's available in your checkpoint directory.
-- **Preset Revamp** -- All 7 built-in presets fleshed out with complete field coverage (adapter type, cruise control, checkpointing ratio, etc.). Presets now display adapter type, rank, LR, and epochs in the selection card. Type coercion fixes presets saved with numbers as strings.
-- **Encoding Error Resilience** -- Genius, Gemini, and OpenAI providers now detect encoding errors (including errors wrapped by SDK exception types) and bail immediately instead of retrying 3× on deterministic failures. Saves ~70 seconds per batch when processing songs with non-ASCII titles.
-- **Linux Desktop Integration** -- `.desktop` file and icon installed to XDG standard locations by the Linux installer. Side-Step appears in your application menu with its own icon.
-- **Electron Hardening** -- Navigation guard prevents blank-page crashes, renderer crash detection, DevTools shortcut (F12), native desktop notifications for training completion.
-- **Prompt Helpers Fix** -- `ask()` now correctly casts default values through `type_fn`, fixing numeric wizard defaults that were silently returned as strings.
-
-### New in 1.1.1
-
-- **Tensorboard-Like Monitor** -- Revamped Monitor tab to include more relevant information and better data representation, paired with Tensorboard style and Side-Step's design language.
-- **Music Flamingo Provider** -- Use Music Flamingo as a metadata and/or lyrics provider. Supports local servers via configurable URL and remote Hugging Face endpoints with token authentication.
-- **Transcriber Server Provider** -- Dedicated lyrics provider backed by a configurable Transcriber Server URL. Nested response parsing, multipart transport, and automatic fallback handling.
-- **Batched Caption Jobs** -- The GUI now runs caption generation as batched jobs. Multiple audio files are queued and processed in sequence with per-file progress, automatic retries, and cancellation support. No more one-at-a-time blocking. (Technically there since 1.0 but updated the readme to reflect the changes)
-- **Overwrite-Lyrics-Only Mode** -- Update only the lyrics field in existing sidecars without touching the rest of the metadata. Useful when re-running lyrics with a different provider.
-- **Explicit Sequence Crop Controls** -- Choose between full sample, chunk by seconds, or max latent length. Backend, presets, UI, and VRAM estimation all support the new modes.
-- **Turbo Training Overhaul** -- Replaced the old discrete 8-step Turbo schedule with continuous logit-normal timestep sampling and re-enabled CFG dropout. Turbo LoRA training now follows a proper training-oriented distribution.
-- **Cruise Control Progress** -- Target loss scale and EMA are now reported in the progress file, visible in the GUI monitor.
-- **TensorBoard-Parity Charts** -- The GUI training monitor now matches TensorBoard's smoothing algorithm, y-domain (P5-P95 with nice boundaries), grid counts, scroll zoom, pan, and closest-point finding. No external TensorBoard needed.
-- **CLI / Wizard / GUI Parity** -- All new features (crop modes, provider selection, endpoint URLs, HF token) are available across all three interfaces.
-- **Bug Fixes** -- `dtype` → `torch_dtype` in all `from_pretrained` calls (models were loading in default precision), LR restore on gradient flush path, caption regex truncation on apostrophes, faster TensorBoard flush (5s vs 30s), and several provider integration fixes.
-
-### New in 1.1.2
-
-- **Selectable Timestep Sampling** -- Choose between continuous (logit-normal, recommended) and discrete (8-step turbo inference schedule) timestep sampling. Available in the GUI as a dropdown, in the Wizard under "All the Levers", and via `--timestep-mode` in the CLI. Default is continuous for all model variants. Discrete mode is the legacy turbo behavior for users who want to train at exactly the 8 inference timesteps.
-
----
-
-## The Three Ways to Use Side-Step
-
-> The experimental TUI from 0.9.0 and before has been deprecated. The interactive Wizard is its definitive replacement.
-
-### 1. The Desktop Window (GUI)
-
-Visual training, dataset management, live charts, and CRT-classic aesthetics (if you manage to find it :3).
-
-```bash
-uv run sidestep gui
-```
-
-**Modes:** Ez Mode | Advanced | Monitor | Lab (History, Tensor Datasets, Audio Library, Preprocess, PP++, Export)
-
-![Ez Mode](assets/Screenshots/Side-Step%20EZ%20Mode.png)
-![Advanced Mode](assets/Screenshots/Side-Step%20Advanced%20Mode.png)
-![Audio Library](assets/Screenshots/Side-Step%20Audio%20Library.png)
-
-### 2. The Interactive Wizard
-
-Terminal prompts with back-navigation, presets, and flow chaining (preprocess -> train, PP++ -> train, build dataset -> preprocess -> train).
-
-```bash
-uv run sidestep
-```
-
-![Wizard](assets/Screenshots/Side-Step%20Wizard%20Main.png)
-
-### 3. The Command Line (CLI)
-
-Automate pipelines or bypass menus entirely. Every argument has a `(default: X)` in `--help`.
-
-```bash
-uv run sidestep train \
-    --checkpoint-dir ./checkpoints \
-    --model base \
-    --dataset-dir ./my_tensors \
-    --output-dir ./output/my_lora \
-    --adapter-type dora \
-    --rank 64 --alpha 128 \
-    --epochs 500
-```
-
----
-
-## Quick Install
-
-### Linux / macOS
-```bash
-git clone https://github.com/koda-dernet/Side-Step.git
-cd Side-Step
-chmod +x install_linux.sh && ./install_linux.sh
-```
+## Installation
 
 ### Windows
+
+1. Clone or extract this repository into a writable folder.
+2. Run `install_windows.bat`. It creates `.venv`, installs dependencies, and downloads the default models.
+3. Run `start_ui.bat`. The UI opens at `http://127.0.0.1:8771` with a session token.
+
+No administrator privileges or ComfyUI installation are required. The installer uses its own Python environment and does not update ComfyUI packages.
+
 ```powershell
-git clone https://github.com/koda-dernet/Side-Step.git
-cd Side-Step
-.\install_windows.ps1
+.\jk-step.bat doctor
+.\jk-step.bat --help
+.\jk-step.bat train --help
 ```
 
-The installer handles Python 3.11, PyTorch, Electron, and all dependencies via `uv`. Flash Attention is pulled from pre-built wheels -- no 20-minute (or more) local compilation.
+The tested stack uses Python 3.12, PyTorch 2.10, CUDA 12.8, and TorchCodec 0.10. [constraints.txt](constraints.txt) pins the verified dependency versions.
 
-### Get Models
+| Installer option | Effect |
+| --- | --- |
+| `install_windows.bat -CoreOnly` | Install the core trainer/UI without additional captioning, stem-separation, and terminal-UI integrations. |
+| `install_windows.bat -Rewards` | Also install optional CLAP and Audiobox scorers. |
+| `install_windows.bat -SkipModels` | Skip model downloads; use local models or run `models setup` later. |
+| `install_windows.bat -Backend cpu` | Install CPU PyTorch for development or small tests. XL training on CPU is slow. |
 
-You need the ACE-Step 1.5 checkpoints. If you don't have them:
-```bash
-git clone https://github.com/ace-step/ACE-Step-1.5.git
-cd ACE-Step-1.5 && uv sync && uv run acestep-download
-```
+SoundFile supports the basic WAV/FLAC workflow. Formats needing TorchCodec also require compatible shared FFmpeg libraries; see the [official compatibility instructions](https://github.com/meta-pytorch/torchcodec#compatibility-with-torch-versions).
 
----
+### Linux
 
-## VRAM Profiles
-
-Side-Step runs on everything from an RTX 3060 to an H100. Built-in presets configure these automatically.
-
-| Profile | VRAM | Strategy |
-| :--- | :--- | :--- |
-| **Comfortable** | 24 GB+ | AdamW, Batch 2+, Rank 128 |
-| **Standard** | 16-24 GB | AdamW, Batch 1, Rank 64 |
-| **Tight** | 12-16 GB | AdamW8bit, Encoder offloading |
-| **Minimal** | 8-10 GB | AdamW8bit, Offloading, Grad accumulation 8, Rank 16 |
-
-Gradient checkpointing is **on by default**, reducing baseline VRAM to ~7 GB before optimizer state.
-
----
-
-## Workflows
-
-### Preprocessing
-
-Convert raw audio into training tensors. Two-pass approach keeps peak VRAM low.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then run:
 
 ```bash
-uv run sidestep preprocess \
-    --audio-dir ./my_songs \
-    --tensor-output ./my_tensors \
-    --normalize peak
+bash install_linux.sh
+bash jk-step.sh doctor
+bash jk-step.sh gui
 ```
 
-### Training
+`JK_BACKEND=cpu` selects CPU wheels; `JK_SKIP_MODELS=1` skips model downloads. Windows and Linux installers are provided. The engine accepts MPS devices, but XL training has not been validated on macOS.
 
-Train an adapter on preprocessed tensors. Side-Step detects your variant and applies the correct schedule.
+### Storage and GPU memory
 
-```bash
-uv run sidestep train \
-    --checkpoint-dir ./checkpoints \
-    --model base \
-    --dataset-dir ./my_tensors \
-    --output-dir ./output/my_lora \
-    --epochs 500
+Reserve approximately **22 GB for default models**, plus the environment, audio, cached tensors, and adapters. The SFT XL file itself is about 20 GB. Its standard Hugging Face filename is created as a hardlink where supported; other filesystems may need another approximately 20 GB copy for toolkit compatibility.
+
+A 24 GB RTX 3090 was used for software smoke tests. Actual VRAM depends on crop length, batch, rank, target layers, and precision. Start with batch 1, mixed precision, offload, and gradient checkpointing. The default selects GPU 0; a supported device can be chosen explicitly, for example `--device cuda:1` or `--device cpu`.
+
+## Models
+
+```powershell
+# The default installer already performs this step.
+.\jk-step.bat models setup --checkpoint-dir checkpoints
 ```
 
-### Preprocessing++ (Adaptive Ranks)
+| Component | Source |
+| --- | --- |
+| Pure SFT XL weights | [jeankassio/acestep_v1.5_sft_xl](https://huggingface.co/jeankassio/acestep_v1.5_sft_xl), at the pinned revision recorded by the application. |
+| Matching architecture, config, and silence latent | [ACE-Step/acestep-v15-xl-sft](https://huggingface.co/ACE-Step/acestep-v15-xl-sft), pinned separately. |
+| VAE and Qwen3-Embedding-0.6B | [ACE-Step/Ace-Step1.5](https://huggingface.co/ACE-Step/Ace-Step1.5), with the resolved revision recorded locally. |
 
-Find which layers matter most for your data, then allocate rank accordingly.
+Downloads are resumable and completed files are reused. This workflow needs no Turbo/Merge checkpoint or music-generating language model. Reward/toolkit models are additional downloads.
 
-```bash
-uv run sidestep analyze \
-    --checkpoint-dir ./checkpoints \
-    --model base \
-    --dataset-dir ./my_tensors
+For an existing safetensors file, set `checkpoint_file` and its matching `model_config_dir`. Parameter names and shapes are checked before allocating weights. `--no-auto-download` disables the default automatic download path. Standard Hugging Face model directories can instead use `checkpoint_dir` and `model_variant` (`xl-sft`, `sft`, `xl-base`, or `base`). Distilled Turbo preference training is not enabled in this engine.
+
+## Browser UI and dataset toolkit
+
+```powershell
+.\jk-step.bat gui
+# Optional: change the port and do not open a browser automatically.
+.\jk-step.bat gui --port 8772 --no-browser
 ```
 
-Writes `fisher_map.json` into the dataset folder. Training auto-detects it and applies variable ranks.
+The MR-FlowDPO page combines model setup, pair construction/scoring, preprocessing, configuration, logs, and cancellation. Its toolkit link opens audio organization, sidecars, captions/lyrics, analysis, stems, PP++, and the inherited supervised/adapters workflow.
 
-### AI Captioning
-
-Generate rich sidecar metadata for your audio files.
-
-```bash
-uv run sidestep captions \
-    --audio-dir ./my_songs \
-    --provider local_16gb       # or gemini, openai, lyrics_only
-
-# With Music Flamingo metadata + Transcriber Server lyrics:
-uv run sidestep captions \
-    --audio-dir ./my_songs \
-    --metadata-provider music_flamingo \
-    --lyrics-provider transcriber_server \
-    --music-flamingo-url http://localhost:5000 \
-    --transcriber-server-url http://localhost:8000
+```powershell
+.\jk-step.bat toolkit --help
+.\jk-step.bat toolkit dataset --help
+.\jk-step.bat toolkit captions --help
+.\jk-step.bat toolkit preprocess --help
 ```
 
-### Export to ComfyUI
+`sidestep` remains a compatibility alias for `toolkit`. [UPSTREAM.md](UPSTREAM.md) preserves the historical project documentation and attribution; [docs/toolkit](docs/toolkit) contains inherited guides. The current Python toolkit package is `jk_engine`; its optional terminal-UI entry point is `jk_step_tui.py`.
 
-```bash
-uv run sidestep export \
-    --adapter-dir ./output/my_lora/final \
-    --target native
+## Prepare preference datasets
+
+Each pair contains a **chosen** and **rejected** recording representing the same intended caption and lyrics. Keep their starts aligned and durations equal. The chosen side must actually be better under the criteria you want to teach.
+
+Supply the exact sung words, a useful musical caption, and correct metadata. Do not label a vocal song `[Instrumental]`. Review automatic captions/transcriptions. For a general-quality adapter, vary genres, languages, singers, tempos, instruments, and arrangements. A narrow dataset can still teach a narrow style.
+
+### Human-selected pairs
+
+Edit [configs/pair_import.example.json](configs/pair_import.example.json), then import it. Paths resolve relative to the manifest. `group_id` identifies the recording/prompt; `holdout_group` can identify an artist or larger validation group. `pair_weight` optionally controls the pair's training weight.
+
+```powershell
+.\jk-step.bat pairs build --input configs/pair_import.example.json --output datasets/human_pairs --options configs/import.example.json
 ```
 
-### Dataset Building
+Keep variants of the same recording or artist out of both training and validation simultaneously.
 
-```bash
-uv run sidestep dataset --input ./my_music_folder
+### Multi-reward selection from existing candidates
+
+Create a manual score template, group comparable candidates, fill their scores, and apply MRSD selection:
+
+```powershell
+.\jk-step.bat pairs score --input my_audio --output datasets/scores.json --template
+.\jk-step.bat pairs build --input datasets/scores.json --output datasets/mrsd --options configs/mrsd.example.json
 ```
 
----
+The example uses text alignment, production quality, and semantic consistency, plus protected `lyric_fidelity`. Fill every required score or explicitly configure fewer axes. Missing scores are not invented. Selection requires a strong primary-axis improvement, improvements in other selected axes, and protected-axis constraints; quantiles, quality floors, outlier filters, and axis balancing are configurable.
 
-## Complete Subcommand List
+Optional automatic backends include musical CLAP and Audiobox Production Quality. The paper's semantic reward needs a music-trained HuBERT representation and matching centroids; they are not bundled. Supply compatible resources or manual/precomputed scores. CLAP measures audio/text association, not every sung word.
 
-Run `uv run sidestep --help` for full details.
+```json
+{"providers":["clap","audiobox"],"allow_download":true,"device":"cuda:0"}
+```
 
-| Subcommand | Description |
-| :--- | :--- |
-| `train` | Train an adapter (LoRA, DoRA, LoKR, LoHA, OFT) |
-| `preprocess` | Convert audio to .pt tensors (two-pass pipeline) |
-| `analyze` | PP++ -- Fisher analysis for adaptive rank assignment |
-| `audio-analyze` | Offline BPM, key, time signature extraction |
-| `captions` | AI caption generation + lyrics scraping |
-| `tags` | Bulk sidecar tag operations (add/remove triggers) |
-| `dataset` | Build `dataset.json` from audio + sidecar folders |
-| `convert-sidecars` | Migrate legacy sidecar formats |
-| `history` | List past training runs and best loss values |
-| `export` | Export adapter to ComfyUI `.safetensors` |
-| `settings` | View/modify persistent configuration |
-| `gui` | Launch the Electron desktop application |
+Save these options in JSON and pass that file to `pairs score --options`. Two automatic scores alone do not fill all axes in the three-reward example.
 
----
+### Controlled acoustic pairs
 
-## Technical Notes: Timestep Sampling
+```powershell
+.\jk-step.bat pairs build --input my_audio --output datasets/acoustic_pairs --options configs/degraded.example.json
+```
 
-Side-Step ensures your fine-tuning matches the base model's original training distribution:
+The generator supports labelled lowpass, noise, clipping, and vocal-lowpass comparisons. Vocal-only degradation needs aligned vocal stems and `vocal_stems_dir`; filtering a complete mix does not isolate its singer.
 
-1. **Continuous mode** (default) -- Logit-normal sampling + CFG dropout. Recommended for all variants. Samples from a smooth distribution centered around the model's training regime.
-2. **Discrete mode** -- 8-step turbo inference schedule (shift=3.0). Legacy behavior for turbo models — trains at exactly the timestep values used during 8-step inference.
+These comparisons are an acoustic-quality experiment, not evidence of better composition or a solved SFT vocal issue. Degradations prepare training examples, without post-processing generated songs.
 
-Select via `--timestep-mode continuous|discrete` (CLI), the "Timestep sampling" dropdown (GUI), or the Wizard. The upstream trainer often forces the Turbo schedule on all models, which is incorrect for Base/SFT. Side-Step defaults to continuous for all variants and lets you override when needed.
+### Dataset sources
 
----
+Your own licensed recordings can be used. The built-in catalog also links to:
 
-## Documentation
+| Source | Relevant content and use |
+| --- | --- |
+| [JamendoLyrics PT](https://huggingface.co/datasets/Felipehonorato/pt_it_jamendolyrics) | 20 Portuguese originals with human-reviewed full lyrics; per-track licenses, no timestamps. |
+| [MulJam PT annotations](https://github.com/weAreMusicAI/alt-datasets-interspeech2025) | Four selected Portuguese originals with line-level timestamps; import into aligned short segments. MTG source is for noncommercial research/academic use. |
+| [Muse](https://huggingface.co/datasets/bolshyC/Muse) | Existing Suno V5 songs with lyrics/style metadata; needs curation and preferences. Its card declares MIT. |
+| [MUSDB18-HQ](https://sigsep.github.io/datasets/musdb.html) | Real songs with aligned vocal/instrument stems; useful for vocal comparisons. Academic access must be requested; supply lyrics separately. |
+| [MTG-Jamendo](https://github.com/MTG/mtg-jamendo-dataset) | Full tracks with genre/instrument/mood tags. The source specifies noncommercial research/academic use and track-specific licenses. |
+| [JamendoLyrics](https://huggingface.co/datasets/jamendolyrics/jamendolyrics) | Word-aligned singing benchmark; preserve an external evaluation split when assessing diction. |
 
-See `sidestep_documentation/` for detailed guides:
+```powershell
+.\jk-step.bat sources
+# Download only this selected archive, not the whole dataset.
+.\jk-step.bat sources --download bolshyC/Muse --file en_part01_of_35.tar --output datasets/downloads/muse
+```
 
-- [Getting Started](sidestep_documentation/Getting%20Started.md)
-- [End-to-End Tutorial](sidestep_documentation/End-to-End%20Tutorial.md)
-- [Dataset Preparation](sidestep_documentation/Dataset%20Preparation.md)
-- [Training Guide](sidestep_documentation/Training%20Guide.md)
-- [Preprocessing++](sidestep_documentation/Preprocessing++.md)
-- [Preset Management](sidestep_documentation/Preset%20Management.md)
-- [VRAM Optimization Guide](sidestep_documentation/VRAM%20Optimization%20Guide.md)
-- [Shift and Timestep Sampling](sidestep_documentation/Shift%20and%20Timestep%20Sampling.md)
-- [Using Your Adapter](sidestep_documentation/Using%20Your%20Adapter.md)
-- [CLI Argument Reference](sidestep_documentation/CLI%20Argument%20Reference.md)
-- [Windows Notes](sidestep_documentation/Windows%20Notes.md)
+This Muse archive is approximately 11 GB. Archives are not extracted or universally converted into captions/lyrics automatically. Follow the source layout and import the desired audio/metadata through the toolkit. See [dataset notes](docs/DATASETS.md).
 
-## License
+For the bounded Portuguese starter collection (24 existing songs, approximately 146 MB of MP3 plus annotation metadata), use:
 
-[CC BY-NC-SA 4.0](LICENSE) — free for personal and research use with attribution. Commercial use requires written permission from the author.
+```powershell
+.\.venv\Scripts\python.exe scripts/download_portuguese_datasets.py
+.\.venv\Scripts\python.exe scripts/import_jamendolyrics_pt.py --root datasets/downloads/jamendolyrics_pt --output datasets/jamendolyrics_pt --license-filter all
+.\.venv\Scripts\python.exe scripts/import_muljam_pt.py --annotations datasets/downloads/musicai_interspeech2025/dali_muljam_interspeech25.csv --metadata datasets/downloads/muljam_pt/audio_metadata.json --output datasets/muljam_pt
+```
 
----
+On Linux, substitute `.venv/bin/python`. These importers preserve lyrics, source hashes and licenses; the aligned importer writes FLAC or WAV FLOAT32 segments without changing gain or sample rate. Full-track lyrics must not be attached to an arbitrary short crop. These are source samples, not naturally ranked MRSD preferences. See [Portuguese dataset guide](docs/PORTUGUESE_DATASETS.md) for the pilot and its limits.
 
-Contributions are always welcome. The inherent novelty of Audio Transformer-Based Diffusion makes these scripts fresh, and your contributions help every one of us. Open an issue, send a PR, or just share your results.
+## Validate, preprocess, and train
 
----
-## Contrubutors
+Run commands from the project directory, using manifests returned by your pair-building commands:
 
-- Massive shoutout to [@Signorlimone](https://github.com/Signorlimone) for designing and compositing the Side-Step logo.
+```powershell
+.\jk-step.bat pairs validate --manifest datasets/acoustic_pairs/pairs.json
+.\jk-step.bat pairs preprocess --manifest datasets/acoustic_pairs/pairs.json --checkpoint-dir checkpoints --output datasets/tensors
+.\jk-step.bat pairs validate --manifest datasets/tensors/pairs.preprocessed.json --check-tensors
 
-- Amazing work done by [@robustini](https://github.com/robustini) in the training pipeline and lovely optimizations
+.\jk-step.bat config --preset conservative --output configs/my_training.json
+.\jk-step.bat train --config configs/my_training.json --pairs-manifest datasets/tensors/pairs.preprocessed.json --output-dir output/my_quality_lora
+```
+
+Preprocessing caches aligned VAE, text/lyrics, and ACE conditioning tensors. Both branches share conditioning and receive the same crop. The VAE posterior mean is used by default and audio normalization is disabled. Cache fingerprints track source/config changes so compatible tensors can be reused.
+
+Default `context_mode=chosen_semantic` extracts codes from the chosen **existing recording** and shares its detokenized plan with both branches. It generates no Turbo/LM song. `context_mode=silence` uses standard text/lyrics conditioning without this plan. For independent candidates with different melodies, a winner-only plan can bias comparisons; prefer silence unless a shared semantic plan is justified. Pass preprocessing overrides as a JSON file through `--options`.
+
+The `conservative` preset starts with rank 32, alpha 64, LR `1e-6`, beta 100, FM regularization 0.1, batch 1, accumulation 8, and two epochs. These are pilot settings, not established ACE-Step optima. `paper_beta` exposes beta 2000 from the paper's setup.
+
+```powershell
+# Training fields are available through flags, JSON, and the UI.
+.\jk-step.bat train --config configs/my_training.json --rank 64 --alpha 128 --layers 0-15 --learning-rate 0.000001 --pairs-manifest datasets/tensors/pairs.preprocessed.json --output-dir output/rank64
+```
+
+CLI overrides take precedence over loaded JSON. `--set KEY=VALUE` accepts JSON-valued overrides; misspelled or unsupported keys are rejected.
+
+| Area | Configurable controls |
+| --- | --- |
+| Adapter | Rank/alpha/dropout, rsLoRA, per-module rank/alpha, projections, decoder layers, self/cross attention, MLP. |
+| Objective | Beta, chosen-FM/reference-velocity regularization, label smoothing, pair weights, continuous logit-normal/uniform timesteps, shared CFG dropout. |
+| Optimization | Batch/accumulation, epochs or max steps, AdamW/AdamW8bit/Adafactor, LR, weight decay/moments, warmup, constant/linear/cosine scheduler, clipping. |
+| Hardware/data | Device, precision, offload, gradient checkpointing, workers, seeds, aligned crops, repeats, cache verification, group-level validation. |
+| Outputs | Evaluation/logging frequency, TensorBoard, checkpoint frequency/retention, resume, adapter initialization, ComfyUI export. |
+
+Batch size counts **pairs**, each containing two audio branches. The frozen reference adds a forward pass. Accumulation increases effective batch size without keeping all GPU activations. Optional optimizer packages must be installed when selected; the supervised toolkit has other optimizer/adapter choices beyond this preference engine.
+
+### Experimental multi-GPU training
+
+```powershell
+.\jk-step.bat train --config configs/my_training.json --pairs-manifest datasets/tensors/pairs.preprocessed.json --output-dir output/two_gpus --multi-gpu --gpu-ids 0,1 --distributed-backend auto
+```
+
+`batch_size` is per GPU. Effective batch size is `batch_size × gradient_accumulation × number_of_GPUs`. Each GPU holds a decoder replica; **two 24 GB cards do not become one 48 GB memory pool**. Crop length and adapter settings must fit each card individually.
+
+On Linux, automatic backend selection uses NCCL for GPU communication. On Windows, it uses the built-in `local` backend: workers communicate LoRA gradients through CPU memory and a multiprocessing manager, without requiring Gloo or NCCL. The optional `gloo` backend remains available for PyTorch builds that support it. Performance depends on hardware/interconnect and communication overhead. Hardware validation and its limits are recorded in [VALIDATION.md](docs/VALIDATION.md); experimental support is not a speedup guarantee. The UI exposes the corresponding hardware options.
+
+## Checkpoints, stopping, and ComfyUI
+
+Outputs include `training_config.json`, `metrics.jsonl`, optional TensorBoard events, checkpoints, and PEFT adapters. The final directory contains `adapter_model.safetensors`, `adapter_config.json`, and `training_state.pt`; `latest.json` records actual paths.
+
+```powershell
+# Continue the same run with its saved configuration.
+.\jk-step.bat train --config output/my_quality_lora/training_config.json --resume-from output/my_quality_lora/checkpoint-00000100
+
+# Export an existing adapter, preserving effective scaling.
+.\jk-step.bat export --adapter output/my_quality_lora/final --output output/quality.safetensors --target native
+```
+
+Resume restores optimizer, scheduler, scaler, RNG, epoch, and dataset cursor. Incompatible base/model/data/settings changes are rejected. `init_adapter` starts another experiment from compatible existing weights; rank/alpha/dropout/rsLoRA must match that adapter. Use a new output directory for a new run.
+
+Ctrl+C in the CLI or Stop in the UI requests a cooperative stop at an optimizer-update boundary and saves `stopped`. An active GPU kernel cannot be interrupted instantaneously.
+
+With `export_comfyui=true`, successful training also writes `quality_comfyui.safetensors`. Export preserves effective per-module scaling, including rsLoRA and alpha overrides. Use `native` for the ACE-specific ComfyUI loader mapping or `generic` if required by your loader. Apply the LoRA to the SFT base family it was trained on and compare strengths; Turbo does not imply equivalent behavior.
+
+## Method and evaluation limits
+
+The core objective for each chosen/rejected pair is:
+
+```text
+softplus(beta * ((chosen_error - rejected_error)
+               - (reference_chosen_error - reference_rejected_error)))
+```
+
+Errors are masked FP32 velocity errors. Noise, timestep, caption, lyrics, context, and pairwise dropout are shared. Reference inference disables adapters and gradients; only decoder LoRA parameters are updated. ACE's data-to-noise velocity convention is used consistently.
+
+This implements Flow-DPO and multi-reward selection with explicit ACE adaptations. **The paper's numerical reward-prompting mechanism is not implemented.** Adding `quality=10` to captions does not reproduce it. The paper's results cannot be transferred directly to this singing model or arbitrary datasets. Read the [paper](https://arxiv.org/abs/2512.10264), [authors' code](https://github.com/lonzi/mrflow_dpo), and [training notes](docs/TRAINING.md).
+
+Lower loss or better preference margins do not prove better audible music. Evaluate held-out songs/artists/languages/prompts with matching seeds and conditions, comparing SFT with/without LoRA. Judge clarity, artifacts, naturalness, harmony, rhythm, and exact sung words separately. Singing transcription needs human review. A frozen base or lyric-fidelity pair filter does not guarantee unchanged pronunciation after training.
+
+## Development and distribution
+
+```text
+jk_step/          Preference engine, CLI, UI, models and pairs
+jk_engine/        Adapted dataset/supervised toolkit from Side-Step
+frontend/         Browser assets
+configs/          Presets and pair examples
+docs/             Method, datasets, validation and inherited toolkit guides
+scripts/          Packaging and smoke tests
+tests/            Automated tests
+UPSTREAM.md       Historical upstream README
+```
+
+```powershell
+.venv\Scripts\python.exe -m pip install pytest httpx
+.venv\Scripts\python.exe -m pytest -q tests
+.venv\Scripts\python.exe scripts/package_release.py
+```
+
+The release ZIP excludes environments, models, datasets, outputs, tokens, and sessions. Distribute source/installers rather than local caches or `.venv`. A wheel can be built with `uv build --wheel`; use the repository/source ZIP and provided installers for the full standalone toolkit.
+
+## Credits and license
+
+JK-Step MR-FlowDPO is a modified distribution of **[Side-Step](https://github.com/koda-dernet/Side-Step), by koda-dernet**, extended with ACE preference training, pairing/scoring, a new interface/CLI, model setup, and documentation. The inherited license is **[CC BY-NC-SA 4.0](LICENSE)**. Preserve [NOTICE.md](NOTICE.md), the license, and upstream attribution when redistributing; commercial use is not granted by that license.
+
+ACE runtime/architecture and models come from [ACE-Step 1.5](https://github.com/ace-step/ACE-Step-1.5). Pure SFT XL is downloaded from [jeankassio/acestep_v1.5_sft_xl](https://huggingface.co/jeankassio/acestep_v1.5_sft_xl). The objective follows the equations in [MR-FlowDPO](https://arxiv.org/abs/2512.10264); this is an ACE adaptation, not the authors' Audiocraft trainer. Dependencies, weights, and datasets keep their own licenses. No upstream endorsement is implied.

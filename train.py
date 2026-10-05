@@ -51,7 +51,7 @@ _console_handler.setFormatter(_log_formatter)
 # File (captures DEBUG+ including tracebacks)
 # Guard against read-only working directories (e.g. some Windows setups)
 try:
-    _file_handler = logging.FileHandler("sidestep.log", mode="a", encoding="utf-8")
+    _file_handler = logging.FileHandler("jk_step.log", mode="a", encoding="utf-8")
     _file_handler.setLevel(logging.DEBUG)
     _file_handler.setFormatter(_log_formatter)
     _log_handlers = [_console_handler, _file_handler]
@@ -61,7 +61,7 @@ except OSError:
 logging.basicConfig(level=logging.DEBUG, handlers=_log_handlers)
 logger = logging.getLogger("train")
 
-from sidestep_engine._compat import install_torchao_warning_filter
+from jk_engine._compat import install_torchao_warning_filter
 install_torchao_warning_filter()
 
 
@@ -163,7 +163,7 @@ def _auto_resolve_checkpoint_dir(args) -> None:
     if getattr(args, "checkpoint_dir", None):
         return
     try:
-        from sidestep_engine.settings import load_settings
+        from jk_engine.settings import load_settings
         settings = load_settings()
         if settings:
             ckpt = settings.get("checkpoint_dir")
@@ -180,7 +180,7 @@ def _auto_resolve_shift_steps(args) -> None:
     Uses the canonical ``is_turbo()`` detection from ``core.constants`` so
     that CLI, Wizard, and GUI all resolve unknown variant names identically.
     """
-    from sidestep_engine.core.constants import is_turbo as _is_turbo_check
+    from jk_engine.core.constants import is_turbo as _is_turbo_check
 
     # Build a lightweight params dict for is_turbo().
     # Only include num_inference_steps if the user explicitly provided it
@@ -212,11 +212,11 @@ def _dispatch(args) -> int:
 
     Returns an int exit code (0 = success).
     """
-    from sidestep_engine.cli.common import validate_paths
+    from jk_engine.cli.common import validate_paths
 
     # -- Config file merge (JSON values fill unset CLI args) ----------------
     if getattr(args, "config", None):
-        from sidestep_engine.cli.config_builder import (
+        from jk_engine.cli.config_builder import (
             _apply_config_file,
             _populate_defaults_cache,
         )
@@ -280,7 +280,7 @@ def _dispatch(args) -> int:
         return 1
 
     if sub == "train":
-        from sidestep_engine.cli.train_fixed import run_fixed
+        from jk_engine.cli.train_fixed import run_fixed
         return run_fixed(args)
 
     elif sub == "analyze":
@@ -304,7 +304,7 @@ def main() -> int:
 
     # -- Compatibility check (non-fatal) ------------------------------------
     try:
-        from sidestep_engine._compat import check_compatibility
+        from jk_engine._compat import check_compatibility
         check_compatibility()
     except Exception:
         pass  # never let the compat check itself crash the CLI
@@ -312,7 +312,7 @@ def main() -> int:
     # -- GUI subcommand (explicit or translated from --gui) -----------------
     if len(sys.argv) > 1 and sys.argv[1] == "gui":
         try:
-            from sidestep_engine.gui import launch
+            from jk_engine.gui import launch
         except ImportError:
             print(
                 "[FAIL] GUI dependencies not installed.\n"
@@ -332,19 +332,19 @@ def main() -> int:
 
     # -- Direct CLI mode (subcommand given) ---------------------------------
     if _has_subcommand():
-        from sidestep_engine.settings import is_first_run
+        from jk_engine.settings import is_first_run
         if is_first_run():
             print(
                 "[INFO] First-time setup not complete. "
                 "Run 'sidestep' without arguments for the interactive setup wizard."
             )
-        from sidestep_engine.cli.common import build_root_parser
+        from jk_engine.cli.common import build_root_parser
         parser = build_root_parser()
         args = parser.parse_args()
         return _dispatch(args)
 
     # -- Interactive wizard session loop ------------------------------------
-    from sidestep_engine.ui.wizard import run_wizard_session
+    from jk_engine.ui.wizard import run_wizard_session
 
     last_code = 0
     for args in run_wizard_session():
@@ -366,8 +366,8 @@ def main() -> int:
 
 def _run_preprocess(args) -> int:
     """Run the two-pass preprocessing pipeline (inline from train --preprocess)."""
-    from sidestep_engine.data.preprocess import preprocess_audio_files
-    from sidestep_engine.ui.dependency_check import (
+    from jk_engine.data.preprocess import preprocess_audio_files
+    from jk_engine.ui.dependency_check import (
         ensure_optional_dependencies,
         required_preprocess_optionals,
     )
@@ -447,8 +447,8 @@ def _run_preprocess(args) -> int:
 
 def _run_preprocess_subcommand(args) -> int:
     """Run preprocessing as a top-level subcommand (``sidestep preprocess``)."""
-    from sidestep_engine.data.preprocess import preprocess_audio_files
-    from sidestep_engine.ui.dependency_check import (
+    from jk_engine.data.preprocess import preprocess_audio_files
+    from jk_engine.ui.dependency_check import (
         ensure_optional_dependencies,
         required_preprocess_optionals,
     )
@@ -530,7 +530,7 @@ def _run_preprocess_subcommand(args) -> int:
 
 def _run_fisher(args) -> int:
     """Run Fisher + Spectral analysis for adaptive LoRA rank assignment."""
-    from sidestep_engine.analysis.fisher import run_fisher_analysis
+    from jk_engine.analysis.fisher import run_fisher_analysis
 
     print("\n" + "=" * 60)
     print("  PP++ / Fisher + Spectral Analysis")
@@ -576,7 +576,7 @@ def _run_fisher(args) -> int:
 
 def _run_build_dataset(args) -> int:
     """Build a dataset.json from a folder of audio + sidecar metadata."""
-    from sidestep_engine.data.dataset_builder import build_dataset
+    from jk_engine.data.dataset_builder import build_dataset
 
     input_dir = args.input
     tag = getattr(args, "tag", "")
@@ -624,8 +624,8 @@ def _run_build_dataset(args) -> int:
 def _run_audio_analyze(args) -> int:
     """Run local offline audio analysis (BPM, key, time signature) on audio files."""
     from pathlib import Path
-    from sidestep_engine.analysis.audio_analysis import analyze_audio
-    from sidestep_engine.data.sidecar_io import (
+    from jk_engine.analysis.audio_analysis import analyze_audio
+    from jk_engine.data.sidecar_io import (
         merge_fields, read_sidecar, sidecar_path_for, write_sidecar,
     )
 
@@ -707,7 +707,7 @@ def _run_audio_analyze(args) -> int:
 def _run_captions(args) -> int:
     """Generate AI captions and/or fetch lyrics for audio sidecar files."""
     from pathlib import Path
-    from sidestep_engine.settings import (
+    from jk_engine.settings import (
         get_caption_provider,
         get_gemini_api_key,
         get_gemini_model,
@@ -719,7 +719,7 @@ def _run_captions(args) -> int:
         get_openai_model,
         get_transcriber_server_url,
     )
-    from sidestep_engine.data.enrich_song import enrich_one, parse_filename
+    from jk_engine.data.enrich_song import enrich_one, parse_filename
 
     input_dir = Path(args.input)
     if not input_dir.is_dir():
@@ -749,7 +749,7 @@ def _run_captions(args) -> int:
             return 1
         model = args.ai_model or get_gemini_model() or "gemini-2.5-flash"
         use_google_search = getattr(args, "google_search", False)
-        from sidestep_engine.data.caption_provider_gemini import generate_caption as _gem_cap
+        from jk_engine.data.caption_provider_gemini import generate_caption as _gem_cap
 
         def caption_fn(title, artist, lyrics_excerpt, audio_path):
             return _gem_cap(title, artist, api_key, audio_path=audio_path,
@@ -764,14 +764,14 @@ def _run_captions(args) -> int:
             return 1
         model = args.ai_model or get_openai_model() or "gpt-4o"
         base_url = args.openai_base_url or get_openai_base_url()
-        from sidestep_engine.data.caption_provider_openai import generate_caption as _oai_cap
+        from jk_engine.data.caption_provider_openai import generate_caption as _oai_cap
 
         def caption_fn(title, artist, lyrics_excerpt, audio_path):
             return _oai_cap(title, artist, api_key, audio_path=audio_path,
                             lyrics_excerpt=lyrics_excerpt, model=model,
                             base_url=base_url)
     elif provider in ("local_8-10gb", "local_16gb"):
-        from sidestep_engine.data.caption_provider_local import generate_caption as _local_cap
+        from jk_engine.data.caption_provider_local import generate_caption as _local_cap
         tier = "8-10gb" if provider == "local_8-10gb" else "16gb"
 
         def caption_fn(title, artist, lyrics_excerpt, audio_path):
@@ -787,7 +787,7 @@ def _run_captions(args) -> int:
         flamingo_url = getattr(args, "music_flamingo_url", None) or get_music_flamingo_url() or ""
         hf_token = getattr(args, "hf_token", None) or get_hf_token() or ""
         if flamingo_url:
-            from sidestep_engine.data.metadata_provider_music_flamingo import (
+            from jk_engine.data.metadata_provider_music_flamingo import (
                 fetch_music_flamingo_metadata as _gen_meta,
             )
 
@@ -812,7 +812,7 @@ def _run_captions(args) -> int:
     if lyrics_provider == "genius":
         token = args.genius_token or get_genius_api_token()
         if token:
-            from sidestep_engine.data.lyrics_provider_genius import fetch_lyrics as _genius
+            from jk_engine.data.lyrics_provider_genius import fetch_lyrics as _genius
 
             def lyrics_fn(artist, title):
                 return _genius(artist, title, token)
@@ -822,7 +822,7 @@ def _run_captions(args) -> int:
     elif lyrics_provider == "transcriber_server":
         server_url = getattr(args, "transcriber_server_url", None) or get_transcriber_server_url() or ""
         if server_url:
-            from sidestep_engine.data.lyrics_provider_server import fetch_lyrics_from_server as _srv_lyrics
+            from jk_engine.data.lyrics_provider_server import fetch_lyrics_from_server as _srv_lyrics
 
             def lyrics_fn(artist, title):
                 return _srv_lyrics("", server_url=server_url, artist=artist, title=title)
@@ -834,7 +834,7 @@ def _run_captions(args) -> int:
         flamingo_url = getattr(args, "music_flamingo_url", None) or get_music_flamingo_url() or ""
         hf_token = getattr(args, "hf_token", None) or get_hf_token() or ""
         if flamingo_url:
-            from sidestep_engine.data.lyrics_provider_music_flamingo import fetch_lyrics_from_music_flamingo as _flam_lyrics
+            from jk_engine.data.lyrics_provider_music_flamingo import fetch_lyrics_from_music_flamingo as _flam_lyrics
 
             def lyrics_fn(artist, title):
                 return _flam_lyrics("", server_url=flamingo_url, artist=artist,
@@ -889,7 +889,7 @@ def _run_captions(args) -> int:
     # Free VRAM if a local model was loaded
     if provider in ("local_8-10gb", "local_16gb"):
         try:
-            from sidestep_engine.data.caption_provider_local import unload_model
+            from jk_engine.data.caption_provider_local import unload_model
             unload_model()
         except Exception:
             pass
@@ -901,7 +901,7 @@ def _run_captions(args) -> int:
 def _run_tags(args) -> int:
     """Bulk sidecar trigger-tag operations."""
     from pathlib import Path
-    from sidestep_engine.data.sidecar_io import read_sidecar, write_sidecar, sidecar_path_for
+    from jk_engine.data.sidecar_io import read_sidecar, write_sidecar, sidecar_path_for
 
     action = args.tags_action
     if not action:
@@ -995,7 +995,7 @@ def _run_tags(args) -> int:
 def _run_convert_sidecars(args) -> int:
     """Convert JSON sidecars to TXT format."""
     from pathlib import Path
-    from sidestep_engine.data.convert_sidecars import (
+    from jk_engine.data.convert_sidecars import (
         convert_per_file_jsons,
         convert_dataset_json,
         detect_json_sidecars,
@@ -1055,7 +1055,7 @@ def _run_convert_sidecars(args) -> int:
 
 def _run_export(args) -> int:
     """Export adapter to ComfyUI format."""
-    from sidestep_engine.core.comfyui_export import export_for_comfyui, resolve_target, get_scaling_info
+    from jk_engine.core.comfyui_export import export_for_comfyui, resolve_target, get_scaling_info
 
     adapter_dir = args.adapter_dir
     output = getattr(args, "output", None)
@@ -1109,7 +1109,7 @@ def _run_export(args) -> int:
 
 def _run_settings(args) -> int:
     """View or modify persistent settings."""
-    from sidestep_engine.settings import (
+    from jk_engine.settings import (
         load_settings,
         save_settings,
         settings_path,
@@ -1179,7 +1179,7 @@ def _run_settings(args) -> int:
         return 0
 
     if action == "defaults":
-        from sidestep_engine.training_defaults import (
+        from jk_engine.training_defaults import (
             DEFAULT_LEARNING_RATE,
             DEFAULT_EPOCHS,
             DEFAULT_SAVE_EVERY,
@@ -1194,7 +1194,7 @@ def _run_settings(args) -> int:
         overrides = getattr(args, "default_overrides", None)
         if overrides:
             print("[INFO] Training defaults are compile-time constants in "
-                  "sidestep_engine/training_defaults.py.")
+                  "jk_engine/training_defaults.py.")
             print("       To override them per-run, use CLI flags (--lr, --epochs, etc.)")
             print("       or save a preset via the wizard.\n")
             for k, v in overrides:
@@ -1215,7 +1215,7 @@ def _run_settings(args) -> int:
 
 def _run_history(args) -> int:
     """List past training runs."""
-    from sidestep_engine.gui.file_ops import build_history
+    from jk_engine.gui.file_ops import build_history
 
     runs = build_history()
     limit = getattr(args, "limit", 20)

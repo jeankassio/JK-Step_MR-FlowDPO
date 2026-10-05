@@ -1,6 +1,6 @@
 """Convert a PEFT LoRA adapter directory to a ComfyUI-compatible single safetensors file.
 
-Thin CLI wrapper around :mod:`sidestep_engine.core.comfyui_export`.
+Thin CLI wrapper around :mod:`jk_engine.core.comfyui_export`.
 Prefer ``sidestep export`` for integrated usage.
 
 Usage:
@@ -20,7 +20,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from sidestep_engine.core.comfyui_export import export_for_comfyui
+from jk_engine.core.comfyui_export import export_for_comfyui
 
 
 def main():
